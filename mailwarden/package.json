@@ -1,0 +1,19 @@
+{
+  "name": "mailwarden",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@8.9.2",
+  "description": "Sender-level Gmail cleanup with consent-gated, fully reversible batch actions.",
+  "workspaces": [
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=server",
+    "build": "npm run build --workspace=server",
+    "start": "npm run start --workspace=server",
+    "typecheck": "npm run typecheck --workspace=server"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

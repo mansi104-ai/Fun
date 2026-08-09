@@ -1,0 +1,45 @@
+# Fly.io deployment.
+#
+#   fly launch --no-deploy --copy-config
+#   fly volumes create mailwarden_data --size 1 --region <your-region>
+#   fly secrets set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
+#                   TOKEN_ENCRYPTION_KEY=... SESSION_SECRET=... \
+#                   APP_URL=https://<app>.fly.dev
+#   fly deploy
+#
+# Then set the OAuth redirect URI in Google Cloud to exactly:
+#   https://<app>.fly.dev/auth/google/callback
+
+app = "mailwarden"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+
+[[mounts]]
+  source = "mailwarden_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # Single instance: SQLite cannot be shared across machines. Raise this only
+  # after migrating to Postgres.
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

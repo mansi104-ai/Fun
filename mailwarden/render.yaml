@@ -1,0 +1,45 @@
+# Render deployment (alternative to fly.toml).
+#
+#   1. Push this repo to GitHub.
+#   2. Render → New → Blueprint → point at this repo.
+#   3. Fill the four secrets marked sync:false in the dashboard.
+#   4. Set the Google OAuth redirect URI to:
+#        https://<service>.onrender.com/auth/google/callback
+#
+# The disk keeps SQLite across deploys. Render's free tier has no persistent
+# disk, so this needs a paid instance — or migrate to Postgres first
+# (docs/05 §2), which is the better answer for public launch anyway.
+
+services:
+  - type: web
+    name: mailwarden
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: DATABASE_PATH
+        value: /data/mailwarden.db
+      - key: APP_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+    disk:
+      name: mailwarden-data
+      mountPath: /data
+      sizeGB: 1

@@ -1,0 +1,649 @@
+/**
+ * Offline test suite — no Gmail, no network, no API keys.
+ *
+ * Covers the paths that decide whether a user loses something they needed:
+ * the protective heuristics, every guardrail in safety/policy.ts, the
+ * plan/execute/undo bookkeeping, and the entitlement gate. It also scans the
+ * source for forbidden Gmail APIs, so the never-delete promise cannot be
+ * broken by a future edit without failing the build.
+ *
+ * Run:  pnpm exec tsx src/smoke.ts
+ */
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { computeCategories, senderKeysForCategory } from "./categories.js";
+import { classifyHeuristically, fallbackClassify, type SenderFacts } from "./classify/heuristics.js";
+import { factsHash as factsHashForTest, isSuggestable } from "./classify/index.js";
+import { CATEGORIES } from "./classify/taxonomy.js";
+import { db } from "./db.js";
+import { planBatch } from "./gmail/executor.js";
+import { aggregateSenders } from "./gmail/sync.js";
+import { newId } from "./lib/crypto.js";
+import { canExecuteBatch } from "./lib/entitlements.js";
+import { DAY_MS, LIMITS } from "./safety/limits.js";
+import { assertExecutable, evaluate, GuardError, type CandidateMessage } from "./safety/policy.js";
+
+let failures = 0;
+let checks = 0;
+
+function check(name: string, condition: boolean, detail = ""): void {
+  checks++;
+  if (!condition) failures++;
+  console.log(`  [${condition ? "PASS" : "FAIL"}] ${name}${detail ? ` — ${detail}` : ""}`);
+}
+const section = (title: string): void => console.log(`\n${title}`);
+
+// ── Fixtures ─────────────────────────────────────────────────────────────
+
+const base: SenderFacts = {
+  senderKey: "x@example.com",
+  displayName: null,
+  domain: "example.com",
+  messageCount: 50,
+  unreadCount: 45,
+  totalBytes: 5_000_000,
+  firstSeen: Date.now() - 400 * DAY_MS,
+  lastSeen: Date.now(),
+  hasUnsubscribe: true,
+  userReplied: false,
+  labels: ["CATEGORY_PROMOTIONS", "UNREAD"],
+  distinctSubjectHashes: 8,
+};
+const facts = (o: Partial<SenderFacts>): SenderFacts => ({ ...base, ...o });
+
+const OLD = Date.now() - 200 * DAY_MS;
+const RECENT = Date.now() - 2 * DAY_MS;
+
+const accountId = newId("acc");
+const userId = newId("usr");
+
+db.prepare(`INSERT INTO users (id, email, plan, created_at, updated_at) VALUES (?,?,?,?,?)`).run(
+  userId, `${userId}@test.local`, "free", Date.now(), Date.now(),
+);
+db.prepare(
+  `INSERT INTO accounts (id, user_id, email, refresh_token_enc, created_at) VALUES (?,?,?,?,?)`,
+).run(accountId, userId, "t@test.local", "x", Date.now());
+
+function addSender(key: string, o: Partial<Record<string, unknown>> = {}): void {
+  db.prepare(
+    `INSERT INTO senders (id, account_id, sender_key, domain, message_count, protected,
+                          user_protected, user_replied, category, confidence)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+  ).run(
+    newId("snd"), accountId, key, key.split("@")[1], (o.message_count as number) ?? 10,
+    (o.protected as number) ?? 0, (o.user_protected as number) ?? 0,
+    (o.user_replied as number) ?? 0, (o.category as string) ?? "promotional",
+    (o.confidence as number) ?? 0.9,
+  );
+}
+
+function addMessages(senderKey: string, count: number, date = OLD): void {
+  const stmt = db.prepare(
+    `INSERT INTO messages_meta (account_id, message_id, sender_key, internal_date, size_bytes, labels)
+     VALUES (?,?,?,?,?,?)`,
+  );
+  for (let i = 0; i < count; i++) {
+    stmt.run(accountId, `m_${senderKey}_${date}_${i}`, senderKey, date, 1000, "INBOX,UNREAD");
+  }
+}
+
+function candidates(senderKey: string): CandidateMessage[] {
+  return db
+    .prepare(
+      `SELECT message_id, sender_key, labels, size_bytes, internal_date
+       FROM messages_meta WHERE account_id = ? AND sender_key = ?`,
+    )
+    .all(accountId, senderKey) as CandidateMessage[];
+}
+
+const cleanup = (): void => {
+  db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
+  db.prepare(`DELETE FROM messages_meta WHERE account_id = ?`).run(accountId);
+};
+
+// ── 1. Heuristics: protective rules ──────────────────────────────────────
+
+section("1. Protective heuristics (boarding pass / OTP / receipt)");
+
+const otp = classifyHeuristically(
+  facts({ senderKey: "no-reply@accounts.google.com", domain: "accounts.google.com", hasUnsubscribe: false, labels: [] }),
+);
+check("OTP sender is protected", otp?.protectedSender === true, otp?.category);
+
+// The exact competitor failure: an airline sitting in Gmail's Promotions tab.
+const airline = classifyHeuristically(
+  facts({ senderKey: "info@united.airlines.com", domain: "united.airlines.com", labels: ["CATEGORY_PROMOTIONS"] }),
+);
+check("Airline in PROMOTIONS is protected, not archived", airline?.protectedSender === true, airline?.category);
+
+const bank = classifyHeuristically(
+  facts({ senderKey: "alerts@chase.com", domain: "chase.com", hasUnsubscribe: false, labels: [] }),
+);
+check("Bank sender is protected", bank?.protectedSender === true, bank?.category);
+
+const replied = classifyHeuristically(facts({ userReplied: true, senderKey: "deals@groupon.com" }));
+check("Sender you replied to outranks marketing signals", replied?.category === "personal", replied?.category);
+
+const receipt = classifyHeuristically(
+  facts({ senderKey: "order-update@shop.com", hasUnsubscribe: false, distinctSubjectHashes: 48, labels: [] }),
+);
+check("Distinct-subject receipts are protected", receipt?.protectedSender === true, receipt?.category);
+
+section("2. Heuristics: actionable rules");
+
+const promo = classifyHeuristically(facts({ senderKey: "deals@groupon.com", domain: "groupon.com" }));
+check("Unread marketing is promotional", promo?.category === "promotional", `conf ${promo?.confidence}`);
+check("…is suggestable", isSuggestable(promo?.category ?? null, promo?.confidence ?? null));
+check("…is not protected", promo?.protectedSender === false);
+
+const ambiguous = classifyHeuristically(
+  facts({ senderKey: "hello@weirdstartup.io", hasUnsubscribe: false, labels: [], distinctSubjectHashes: 25, messageCount: 30 }),
+);
+check("Ambiguous sender escalates to the LLM tier (null)", ambiguous === null);
+
+// ── 3. Guardrails ────────────────────────────────────────────────────────
+
+section("3. Guardrail: NEVER_DELETE");
+
+addSender("deals@groupon.com");
+addMessages("deals@groupon.com", 10);
+
+const deleteAttempt = evaluate({
+  accountId, action: "delete", senderKeys: ["deals@groupon.com"],
+  candidates: candidates("deals@groupon.com"),
+});
+check(
+  "A 'delete' action is refused outright",
+  deleteAttempt.violations.some((v) => v.code === "NEVER_DELETE" && v.severity === "block"),
+);
+check("…and the batch is not ok", deleteAttempt.ok === false);
+
+section("4. Guardrail: protected / pinned / replied senders");
+
+addSender("alerts@chase.com", { protected: 1, category: "finance" });
+addMessages("alerts@chase.com", 5);
+addSender("pinned@newsletter.com", { user_protected: 1 });
+addMessages("pinned@newsletter.com", 5);
+addSender("friend@personal.com", { user_replied: 1, protected: 0 });
+addMessages("friend@personal.com", 5);
+
+const mixed = evaluate({
+  accountId, action: "archive",
+  senderKeys: ["deals@groupon.com", "alerts@chase.com", "pinned@newsletter.com", "friend@personal.com"],
+  candidates: [
+    ...candidates("deals@groupon.com"), ...candidates("alerts@chase.com"),
+    ...candidates("pinned@newsletter.com"), ...candidates("friend@personal.com"),
+  ],
+  confirmed: true,
+});
+const allowedSenders = new Set(mixed.allowed.map((c) => c.sender_key));
+check("Protected-category sender excluded", !allowedSenders.has("alerts@chase.com"));
+check("User-pinned sender excluded", !allowedSenders.has("pinned@newsletter.com"));
+check("Replied-to sender excluded", !allowedSenders.has("friend@personal.com"));
+check("Unprotected sender still proceeds", allowedSenders.has("deals@groupon.com"));
+check("Exclusions are reported, not silent", mixed.exclusions.length >= 3, `${mixed.exclusions.length} exclusions`);
+check(
+  "…each with a code the UI can render",
+  mixed.exclusions.every((e) => e.code && e.reason && e.senderKey),
+);
+
+section("5. Guardrail: user release override");
+
+db.prepare(`UPDATE senders SET user_protected = -1 WHERE account_id = ? AND sender_key = ?`)
+  .run(accountId, "alerts@chase.com");
+const released = evaluate({
+  accountId, action: "archive", senderKeys: ["alerts@chase.com"],
+  candidates: candidates("alerts@chase.com"), confirmed: true,
+});
+check("Explicit release lets a protected sender through", released.allowed.length === 5);
+
+db.prepare(`UPDATE senders SET user_protected = -1 WHERE account_id = ? AND sender_key = ?`)
+  .run(accountId, "friend@personal.com");
+const releasedReply = evaluate({
+  accountId, action: "archive", senderKeys: ["friend@personal.com"],
+  candidates: candidates("friend@personal.com"), confirmed: true,
+});
+check("…but release can NEVER override the replied-to rule", releasedReply.allowed.length === 0);
+
+// Restore for later assertions.
+db.prepare(`UPDATE senders SET user_protected = 0 WHERE account_id = ?`).run(accountId);
+
+section("6. Guardrail: confidence floor");
+
+addSender("mystery@unknown.io", { confidence: 0.2, category: "unknown" });
+addMessages("mystery@unknown.io", 8);
+const lowConf = evaluate({
+  accountId, action: "archive", senderKeys: ["mystery@unknown.io"],
+  candidates: candidates("mystery@unknown.io"), confirmed: true,
+});
+check(
+  `Sender below the ${LIMITS.hardConfidenceFloor} hard floor is excluded`,
+  lowConf.allowed.length === 0 && lowConf.exclusions.some((e) => e.code === "LOW_CONFIDENCE"),
+);
+
+section("7. Guardrail: recency shield");
+
+addSender("mixedage@shop.com");
+addMessages("mixedage@shop.com", 6, OLD);
+addMessages("mixedage@shop.com", 4, RECENT);
+const recency = evaluate({
+  accountId, action: "archive", senderKeys: ["mixedage@shop.com"],
+  candidates: candidates("mixedage@shop.com"), confirmed: true,
+});
+check(
+  `Messages from the last ${LIMITS.recencyProtectionDays} days are kept`,
+  recency.allowed.length === 6,
+  `${recency.allowed.length} of 10 allowed`,
+);
+check("…and the reason is reported", recency.exclusions.some((e) => e.code === "TOO_RECENT"));
+
+section("8. Guardrail: unknown sender fails closed");
+
+const stale = evaluate({
+  accountId, action: "archive", senderKeys: ["ghost@nowhere.com"], candidates: [],
+});
+check(
+  "A sender that no longer exists blocks the batch",
+  stale.violations.some((v) => v.code === "UNKNOWN_SENDER" && v.severity === "block"),
+);
+
+section("9. Guardrail: velocity + scale");
+
+const synthetic: CandidateMessage[] = Array.from(
+  { length: LIMITS.maxMessagesPerBatch + 1 },
+  (_, i) => ({
+    message_id: `syn_${i}`, sender_key: "deals@groupon.com",
+    labels: "INBOX", size_bytes: 100, internal_date: OLD,
+  }),
+);
+const tooBig = evaluate({
+  accountId, action: "archive", senderKeys: ["deals@groupon.com"],
+  candidates: synthetic, confirmed: true,
+});
+check(
+  "Oversized batch is blocked",
+  tooBig.violations.some((v) => v.code === "BATCH_TOO_LARGE" && v.severity === "block"),
+);
+
+// deals@groupon.com is 10 of ~44 messages in this account — under the 40%
+// anomaly ratio. Widen the batch until it trips.
+addSender("bulk@spam.com");
+addMessages("bulk@spam.com", 60);
+const anomaly = evaluate({
+  accountId, action: "archive", senderKeys: ["bulk@spam.com"],
+  candidates: candidates("bulk@spam.com"),
+});
+check(
+  "A batch spanning most of the mailbox asks for confirmation",
+  anomaly.violations.some((v) => v.code === "SCALE_ANOMALY" && v.severity === "confirm"),
+);
+check("…and is not blocked outright", anomaly.violations.every((v) => v.severity !== "block"));
+check("…requiresConfirmation is set", anomaly.requiresConfirmation === true);
+
+const anomalyConfirmed = evaluate({
+  accountId, action: "archive", senderKeys: ["bulk@spam.com"],
+  candidates: candidates("bulk@spam.com"), confirmed: true,
+});
+check("…and proceeds once confirmed", anomalyConfirmed.ok === true);
+
+// ── 10. Plan / execute contract ──────────────────────────────────────────
+
+section("10. Plan persistence and the TOCTOU gate");
+
+const blockedPlan = planBatch(accountId, "archive", ["bulk@spam.com"], false);
+check("Unconfirmed anomalous plan is not persisted", blockedPlan.batchId === null);
+check("…and reports why", blockedPlan.violations.some((v) => v.code === "SCALE_ANOMALY"));
+
+const plan = planBatch(accountId, "archive", ["deals@groupon.com", "alerts@chase.com"], true);
+check("Plan includes only unprotected senders", plan.messageCount === 10, `${plan.messageCount} messages`);
+check("Protected sender excluded even when explicitly requested",
+  plan.senders.every((s) => s.senderKey !== "alerts@chase.com"));
+check("…and the exclusion is reported to the user",
+  plan.exclusions.some((e) => e.senderKey === "alerts@chase.com"));
+
+const items = db.prepare(`SELECT prior_labels FROM batch_items WHERE batch_id = ?`)
+  .all(plan.batchId!) as { prior_labels: string }[];
+check("Prior labels captured for undo",
+  items.length === 10 && items.every((i) => i.prior_labels.includes("INBOX")));
+
+const batchRow = db.prepare(`SELECT status, guard_report FROM batches WHERE id = ?`)
+  .get(plan.batchId!) as { status: string; guard_report: string | null };
+check("Planning does not execute (status stays pending)", batchRow.status === "pending");
+check("Guard report is persisted for the audit trail", Boolean(batchRow.guard_report));
+
+// The critical regression test: a clean plan must NOT authorise execution if
+// the sender's protection changes in between.
+db.prepare(`UPDATE senders SET user_protected = 1 WHERE account_id = ? AND sender_key = ?`)
+  .run(accountId, "deals@groupon.com");
+
+const revalidated = assertExecutable({
+  accountId, action: "archive", senderKeys: ["deals@groupon.com"],
+  candidates: candidates("deals@groupon.com"),
+});
+check(
+  "Pinning a sender AFTER planning removes it at execute time (TOCTOU)",
+  revalidated.allowed.length === 0,
+);
+
+let threw = false;
+try {
+  assertExecutable({
+    accountId, action: "delete", senderKeys: ["deals@groupon.com"],
+    candidates: candidates("deals@groupon.com"),
+  });
+} catch (err) {
+  threw = err instanceof GuardError;
+}
+check("assertExecutable throws GuardError on a block violation", threw);
+
+db.prepare(`UPDATE senders SET user_protected = 0 WHERE account_id = ?`).run(accountId);
+
+// ── 11. Entitlements ─────────────────────────────────────────────────────
+
+section("11. Entitlement gate");
+
+// Metered in batches, not senders. A free user must be able to run a full
+// one-click recipe — paywalling before the first job completes is the
+// competitor failure documented in docs/00 §2a.
+check("Free plan allows the first cleanup", canExecuteBatch(userId).allowed);
+db.prepare(`UPDATE users SET free_batch_used = 1 WHERE id = ?`).run(userId);
+const exhausted = canExecuteBatch(userId);
+check("Free plan blocks the second cleanup", !exhausted.allowed && exhausted.upgradeRequired === true);
+db.prepare(`UPDATE users SET plan = 'starter' WHERE id = ?`).run(userId);
+check("Paid plan is unrestricted", canExecuteBatch(userId).allowed);
+
+// ── 12. Regressions found against a real 6,000-message mailbox ───────────
+
+section("12. Real-inbox regressions");
+
+// BUG 1: a single stray reply used to lock an entire bulk sender as
+// 'personal'. Measured cost: 15 senders / 1,964 messages — a third of the
+// mailbox — permanently untouchable.
+const bulkAcct = newId("acc");
+const bulkUser = newId("usr");
+db.prepare(`INSERT INTO users (id, email, plan, created_at, updated_at) VALUES (?,?,?,?,?)`)
+  .run(bulkUser, `${bulkUser}@t.local`, "free", Date.now(), Date.now());
+db.prepare(`INSERT INTO accounts (id, user_id, email, refresh_token_enc, created_at) VALUES (?,?,?,?,?)`)
+  .run(bulkAcct, bulkUser, "me@t.local", "x", Date.now());
+
+const insertM = db.prepare(
+  `INSERT INTO messages_meta (account_id, message_id, thread_id, sender_key, internal_date, size_bytes, labels)
+   VALUES (?,?,?,?,?,?,?)`,
+);
+// Newsletter: 100 messages, exactly one of which sits in a replied thread.
+for (let i = 0; i < 100; i++) {
+  insertM.run(bulkAcct, `bulk_${i}`, `tb_${i}`, "news@bigsender.com", OLD, 1000, "INBOX");
+}
+insertM.run(bulkAcct, `sent_bulk`, `tb_0`, "me@t.local", OLD, 500, "SENT");
+// Colleague: 8 messages, all conversational.
+for (let i = 0; i < 8; i++) {
+  insertM.run(bulkAcct, `col_${i}`, `tc_${i}`, "colleague@work.com", OLD, 1000, "INBOX");
+  insertM.run(bulkAcct, `sent_col_${i}`, `tc_${i}`, "me@t.local", OLD, 500, "SENT");
+}
+// A noreply address that somehow appears in a replied thread (forward, or a
+// Gmail threading artifact). It can never be a real correspondent.
+for (let i = 0; i < 40; i++) {
+  insertM.run(bulkAcct, `nr_${i}`, `tn_${i}`, "noreply@alerts.com", OLD, 1000, "INBOX");
+}
+insertM.run(bulkAcct, `sent_nr`, `tn_0`, "me@t.local", OLD, 500, "SENT");
+for (let i = 0; i < 20; i++) {
+  insertM.run(bulkAcct, `nr2_${i}`, `tn_0`, "noreply@alerts.com", OLD, 1000, "INBOX");
+}
+
+aggregateSenders(bulkAcct);
+const flagged = (key: string): number =>
+  (db.prepare(`SELECT user_replied FROM senders WHERE account_id=? AND sender_key=?`)
+    .get(bulkAcct, key) as { user_replied: number } | undefined)?.user_replied ?? -1;
+
+check("Bulk sender with 1 reply in 100 is NOT a correspondent", flagged("news@bigsender.com") === 0);
+check("Genuine correspondent IS detected", flagged("colleague@work.com") === 1);
+check("noreply@ address is never a correspondent", flagged("noreply@alerts.com") === 0);
+
+// BUG 2: the user's own sent mail was aggregated into a sender row, offering
+// 116 of their own messages up for archiving.
+check("User's own address is not a sender", flagged("me@t.local") === -1);
+
+// BUG 3: 'no-reply@' was a security signal, which matches most automated mail.
+// It classified Google Classroom (647 messages) as security and locked it.
+const classroom = classifyHeuristically(
+  facts({ senderKey: "no-reply@classroom.google.com", domain: "classroom.google.com",
+          hasUnsubscribe: false, labels: ["CATEGORY_UPDATES"], distinctSubjectHashes: 40 }),
+);
+check("Generic no-reply@ is not classified as security",
+  classroom === null || classroom.category !== "security", classroom?.category ?? "escalated");
+const realSecurity = classifyHeuristically(
+  facts({ senderKey: "no-reply@accounts.google.com", domain: "accounts.google.com",
+          hasUnsubscribe: false, labels: [] }),
+);
+check("…while genuine security senders still are", realSecurity?.category === "security");
+
+db.prepare(`DELETE FROM users WHERE id = ?`).run(bulkUser);
+db.prepare(`DELETE FROM messages_meta WHERE account_id = ?`).run(bulkAcct);
+
+// ── 13. Category view ────────────────────────────────────────────────────
+
+section("13. Category view: completeness and scope integrity");
+
+const catUser = newId("usr");
+const catAcct = newId("acc");
+db.prepare(`INSERT INTO users (id, email, plan, created_at, updated_at) VALUES (?,?,?,?,?)`).run(
+  catUser, `${catUser}@test.local`, "free", Date.now(), Date.now(),
+);
+db.prepare(
+  `INSERT INTO accounts (id, user_id, email, refresh_token_enc, created_at) VALUES (?,?,?,?,?)`,
+).run(catAcct, catUser, "cat@test.local", "x", Date.now());
+
+function addCatSender(
+  key: string,
+  category: string,
+  count: number,
+  o: { protected?: number; confidence?: number } = {},
+): void {
+  db.prepare(
+    `INSERT INTO senders (id, account_id, sender_key, domain, message_count, protected,
+                          user_protected, user_replied, category, confidence)
+     VALUES (?,?,?,?,?,?,0,0,?,?)`,
+  ).run(
+    newId("snd"), catAcct, key, key.split("@")[1], count, o.protected ?? 0,
+    category, o.confidence ?? 0.9,
+  );
+  const stmt = db.prepare(
+    `INSERT INTO messages_meta (account_id, message_id, sender_key, internal_date, size_bytes, labels)
+     VALUES (?,?,?,?,?,?)`,
+  );
+  for (let i = 0; i < count; i++) {
+    stmt.run(catAcct, `cm_${key}_${i}`, key, OLD, 2000, "INBOX,UNREAD");
+  }
+}
+
+addCatSender("deals@shop.com", "promotional", 40);
+addCatSender("news@paper.com", "newsletter", 20);
+addCatSender("alerts@bank.com", "finance", 30, { protected: 1 });
+addCatSender("codes@auth.com", "security", 10, { protected: 1 });
+addCatSender("mystery@nowhere.com", "promotional", 15, { confidence: 0.2 });
+
+const cats = computeCategories(catAcct);
+const byId = new Map(cats.map((c) => [c.id, c]));
+
+check("Every taxonomy category is returned", cats.length === CATEGORIES.length,
+  `${cats.length} of ${CATEGORIES.length}`);
+check("Protected categories are still listed, not hidden",
+  byId.get("finance") !== undefined && byId.get("security") !== undefined);
+check("Protected category reports its real total",
+  byId.get("finance")?.totalMessages === 30);
+check("…but nothing in it is cleanable",
+  byId.get("finance")?.cleanableMessages === 0);
+check("Protected category is flagged as such", byId.get("finance")?.isProtected === true);
+
+const promoCat = byId.get("promotional")!;
+check("Actionable category exposes cleanable mail", promoCat.cleanableMessages === 40,
+  String(promoCat.cleanableMessages));
+check("Low-confidence sender is held, not offered",
+  promoCat.senders.find((s) => s.senderKey === "mystery@nowhere.com")?.cleanableCount === 0);
+check("Held sender carries a reason the UI can show",
+  Boolean(promoCat.senders.find((s) => s.senderKey === "mystery@nowhere.com")?.holdReason));
+check("heldMessages accounts for the gap exactly",
+  promoCat.heldMessages === promoCat.totalMessages - promoCat.cleanableMessages);
+check("Empty categories are present at zero", byId.get("travel")?.totalMessages === 0);
+
+// Scope integrity: the client can narrow a category but never widen it.
+check("No narrowing returns the whole actionable set",
+  senderKeysForCategory(catAcct, "promotional")?.length === 1);
+check("Narrowing to a subset is honoured",
+  JSON.stringify(senderKeysForCategory(catAcct, "promotional", ["deals@shop.com"])) ===
+    JSON.stringify(["deals@shop.com"]));
+check("A foreign sender key cannot be smuggled into a category",
+  senderKeysForCategory(catAcct, "promotional", ["alerts@bank.com"])?.length === 0);
+check("A held sender cannot be re-included by asking for it",
+  senderKeysForCategory(catAcct, "promotional", ["mystery@nowhere.com"])?.length === 0);
+check("An unknown category id is rejected",
+  senderKeysForCategory(catAcct, "not-a-category") === null);
+
+db.prepare(`DELETE FROM users WHERE id = ?`).run(catUser);
+db.prepare(`DELETE FROM messages_meta WHERE account_id = ?`).run(catAcct);
+
+// ── 14. Agent: learning, caching, and degradation ────────────────────────
+
+section("14. Agent: user decisions outrank inference");
+
+const learned = classifyHeuristically(
+  facts({ senderKey: "digest@somelist.com", domain: "somelist.com", labels: [], hasUnsubscribe: false,
+          userDecision: "archive", decisionCount: 3 }),
+);
+check("A sender the user cleaned before is actionable", learned?.category === "promotional");
+check("…with confidence that grows with repetition", (learned?.confidence ?? 0) > 0.9,
+  String(learned?.confidence));
+check("…and is not sent to the LLM again", learned !== null);
+
+const kept = classifyHeuristically(
+  facts({ senderKey: "digest@somelist.com", labels: [], userDecision: "keep" }),
+);
+check("A sender the user kept is protected", kept?.protectedSender === true);
+
+// The precedence that matters: a past decision must NOT unlock a sender that
+// has since started carrying things the user cannot afford to lose.
+const decidedButSecurity = classifyHeuristically(
+  facts({ senderKey: "no-reply@accounts.google.com", domain: "accounts.google.com",
+          hasUnsubscribe: false, labels: [], userDecision: "archive", decisionCount: 5 }),
+);
+check("A past 'archive' never overrides a security sender",
+  decidedButSecurity?.category === "security" && decidedButSecurity.protectedSender === true,
+  decidedButSecurity?.category);
+
+const decidedButReplied = classifyHeuristically(
+  facts({ senderKey: "colleague@work.com", userReplied: true, userDecision: "archive" }),
+);
+check("A past 'archive' never overrides a replied-to sender",
+  decidedButReplied?.category === "personal" && decidedButReplied.protectedSender === true);
+
+section("15. Agent: fallback when the model is unavailable");
+
+// Strong, entirely local bulk evidence: unsubscribe header, volume, ignored.
+const fb = fallbackClassify(
+  facts({ messageCount: 40, unreadCount: 38, hasUnsubscribe: true, distinctSubjectHashes: 6 }),
+);
+check("Obvious bulk mail gets an honest guess rather than a lock", fb !== null, fb?.category);
+check("…above the guard layer's hard floor", (fb?.confidence ?? 0) > LIMITS.hardConfidenceFloor);
+check("…but below the auto-suggest bar", (fb?.confidence ?? 1) < LIMITS.suggestConfidenceFloor);
+check("…so it is never auto-suggested",
+  !isSuggestable(fb?.category ?? null, fb?.confidence ?? null));
+check("…and it is not marked protected", fb?.protectedSender === false);
+
+check("No unsubscribe header — no guess",
+  fallbackClassify(facts({ messageCount: 40, unreadCount: 38, hasUnsubscribe: false })) === null);
+check("Mail the user actually reads — no guess",
+  fallbackClassify(facts({ messageCount: 40, unreadCount: 5, hasUnsubscribe: true })) === null);
+check("Too few messages — no guess",
+  fallbackClassify(facts({ messageCount: 4, unreadCount: 4, hasUnsubscribe: true })) === null);
+check("Varied subjects (likely real receipts) — no guess",
+  fallbackClassify(
+    facts({ messageCount: 40, unreadCount: 38, hasUnsubscribe: true, distinctSubjectHashes: 39 }),
+  ) === null);
+
+section("16. Agent: verdict caching is bucketed, not brittle");
+
+const stableA = factsHashForTest(facts({ messageCount: 100, unreadCount: 90 }));
+const stableB = factsHashForTest(facts({ messageCount: 103, unreadCount: 93 }));
+check("A few new messages do not invalidate a verdict", stableA === stableB);
+
+check("Crossing a volume bucket does",
+  stableA !== factsHashForTest(facts({ messageCount: 1000, unreadCount: 900 })));
+check("A change in read behaviour does",
+  stableA !== factsHashForTest(facts({ messageCount: 100, unreadCount: 20 })));
+check("Gaining a reply does",
+  stableA !== factsHashForTest(facts({ messageCount: 100, unreadCount: 90, userReplied: true })));
+check("A user decision does",
+  stableA !== factsHashForTest(
+    facts({ messageCount: 100, unreadCount: 90, userDecision: "archive", decisionCount: 1 }),
+  ));
+check("Losing the unsubscribe header does",
+  stableA !== factsHashForTest(
+    facts({ messageCount: 100, unreadCount: 90, hasUnsubscribe: false }),
+  ));
+check("Gmail re-categorising the sender does",
+  stableA !== factsHashForTest(
+    facts({ messageCount: 100, unreadCount: 90, labels: ["CATEGORY_UPDATES"] }),
+  ));
+check("Label ORDER does not — the hash must be order-independent",
+  factsHashForTest(facts({ messageCount: 100, unreadCount: 90, labels: ["CATEGORY_PROMOTIONS", "CATEGORY_UPDATES"] })) ===
+    factsHashForTest(facts({ messageCount: 100, unreadCount: 90, labels: ["CATEGORY_UPDATES", "CATEGORY_PROMOTIONS"] })));
+
+// ── 17. Source-level invariants ──────────────────────────────────────────
+
+section("17. Source scan: forbidden capabilities");
+
+const srcRoot = path.dirname(fileURLToPath(import.meta.url));
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap((entry) => {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) return sourceFiles(full);
+    return full.endsWith(".ts") && !full.endsWith("smoke.ts") ? [full] : [];
+  });
+}
+/**
+ * Comments are stripped before scanning. Several of these files deliberately
+ * *name* the forbidden APIs in order to warn against them, and a scan that
+ * flagged its own documentation would train everyone to ignore it.
+ */
+const stripComments = (text: string): string =>
+  text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+const sources = sourceFiles(srcRoot).map((f) => ({
+  file: f,
+  text: stripComments(readFileSync(f, "utf8")),
+}));
+
+// If any of these ever appear, the never-delete promise in docs/03 is broken
+// and the CASA Tier 2 scope argument no longer holds.
+const forbidden: [RegExp, string][] = [
+  [/messages\s*\.\s*delete\s*\(/, "gmail messages.delete"],
+  [/batchDelete\s*\(/, "gmail batchDelete"],
+  [/https:\/\/mail\.google\.com/, "full-access scope mail.google.com"],
+  [/gmail\.readonly/, "gmail.readonly scope"],
+];
+for (const [pattern, label] of forbidden) {
+  const hits = sources.filter((s) => pattern.test(s.text));
+  check(`No use of ${label}`, hits.length === 0,
+    hits.map((h) => path.basename(h.file)).join(", "));
+}
+
+// The guard layer is only meaningful if it is the sole path to mutation.
+const executor = sources.find((s) => s.file.endsWith("executor.ts"))!;
+check("executor.ts routes through assertExecutable", executor.text.includes("assertExecutable("));
+const mutators = sources.filter(
+  (s) => /users\.messages\.batchModify/.test(s.text) && !s.file.endsWith("executor.ts"),
+);
+check("batchModify is called from executor.ts only", mutators.length === 0,
+  mutators.map((m) => path.basename(m.file)).join(", "));
+
+// ── Done ─────────────────────────────────────────────────────────────────
+
+cleanup();
+console.log(
+  failures === 0
+    ? `\nAll ${checks} checks passed.\n`
+    : `\n${failures} of ${checks} checks FAILED.\n`,
+);
+process.exit(failures === 0 ? 0 : 1);

@@ -1,0 +1,22 @@
+packages:
+  - "server"
+
+# Only consulted by pnpm 10+, which refuses to run dependency build scripts
+# unless they are named here. The pinned toolchain (pnpm@8.9.2, see
+# package.json → packageManager) does not need it; this is here so that
+# upgrading pnpm does not silently produce an image whose database driver
+# cannot load.
+#
+# It is an allowlist and should stay one. These are the only two packages in
+# the tree with a legitimate reason to execute code at install time:
+#
+#   better-sqlite3  compiles a native binding. Without it the server cannot open
+#                   the database at all; the failure is a missing
+#                   better_sqlite3.node at boot, not an install error.
+#   esbuild         downloads/links its platform binary, used by tsx in dev.
+#
+# Anything else appearing in an ERR_PNPM_IGNORED_BUILDS message should be
+# investigated, not appended.
+onlyBuiltDependencies:
+  - better-sqlite3
+  - esbuild

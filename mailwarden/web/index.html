@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mailwarden — clean your Gmail without losing anything</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --surface: #fff; --border: #e6e4e0; --text: #1a1917;
+    --muted: #6b6862; --accent: #2f5d50; --accent-fg: #fff; --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151412; --surface: #1e1d1a; --border: #33312d; --text: #f0eeea;
+      --muted: #9c988f; --accent: #6fae9b; --accent-fg: #10201b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 64px 24px 96px; }
+  h1 { font-size: clamp(2rem, 5vw, 2.9rem); line-height: 1.15; letter-spacing: -0.022em; margin: 0 0 16px; }
+  h2 { font-size: 1.15rem; letter-spacing: -0.01em; margin: 40px 0 12px; }
+  p { margin: 0 0 16px; }
+  .lede { font-size: 1.15rem; color: var(--muted); margin-bottom: 32px; }
+  .btn {
+    display: inline-block; background: var(--accent); color: var(--accent-fg);
+    padding: 13px 22px; border-radius: var(--radius); text-decoration: none;
+    font-weight: 600; border: 0; cursor: pointer; font-size: 1rem;
+  }
+  .btn:hover { opacity: .9; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 22px; margin: 24px 0;
+  }
+  .card h3 { margin: 0 0 10px; font-size: 1rem; }
+  ul { padding-left: 20px; margin: 0 0 16px; }
+  li { margin-bottom: 8px; }
+  .muted { color: var(--muted); font-size: .92rem; }
+  strong { font-weight: 650; }
+  .badge {
+    display: inline-block; font-size: .78rem; padding: 3px 9px; border-radius: 999px;
+    background: var(--border); color: var(--muted); margin-bottom: 20px;
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <span class="badge">Founding 100 · closed beta</span>
+  <h1>Clean your Gmail without ever losing anything.</h1>
+  <p class="lede">
+    Mailwarden groups your inbox by <strong>sender</strong>, not by message.
+    You make about 200 decisions instead of 40,000 — and every one of them is
+    reversible.
+  </p>
+
+  <a class="btn" href="/auth/google">Connect Gmail</a>
+
+  <!-- The consent screen is the highest-anxiety moment in the funnel.
+       Answering the obvious objections BEFORE the Google redirect converts
+       better than answering them after. See docs/04-ui-design-spec.md §5. -->
+  <div class="card">
+    <h3>What we ask for, and why</h3>
+    <ul>
+      <li>We request permission to <strong>archive, label, and move mail to trash</strong>.</li>
+      <li>We do <strong>not</strong> request permission to permanently delete anything —
+          Google will not even grant us that ability with the access we use.</li>
+      <li>We never read message bodies. We look at senders, dates, and sizes.</li>
+      <li>Trashed mail sits in Gmail for 30 days. You can restore it from Gmail
+          itself, even if you cancel us.</li>
+      <li>Disconnect any time and we erase everything within 24 hours.</li>
+    </ul>
+    <p class="muted">
+      Beta note: while our Google verification is in progress, access is capped at
+      100 users and you may occasionally be asked to reconnect.
+    </p>
+  </div>
+
+  <h2>How it works</h2>
+  <div class="card">
+    <p><strong>1 · Scan.</strong> We read message headers only — sender, date, size,
+    and Gmail's own labels. A large inbox takes two to six minutes.</p>
+    <p><strong>2 · Review.</strong> One card per sender, sorted by how much of your
+    inbox they occupy, each showing why we classified it that way. Receipts,
+    boarding passes, login codes, and anyone you've replied to are locked by default.</p>
+    <p style="margin:0"><strong>3 · Confirm.</strong> Nothing moves until you approve a
+    summary showing exactly what will happen. Then you get a receipt with an
+    Undo button that works for 30 days.</p>
+  </div>
+
+  <h2>Pricing</h2>
+  <div class="card">
+    <p><strong>Free</strong> — full scan, full classification, and one complete
+    sender cleanup, executed for real. No card.</p>
+    <p><strong>Starter · $19/year</strong> — unlimited senders, unlimited cleanups,
+    higher-accuracy classification.</p>
+    <p style="margin:0"><strong>Pro · $39/year</strong> — everything in Starter, plus
+    scheduled re-scans, unsubscribe verification, and up to 5 accounts.</p>
+  </div>
+  <p class="muted">
+    We will never sell your data or your metadata. That is not a policy we could
+    quietly change — the business model is subscriptions, and the architecture
+    doesn't retain enough to sell.
+  </p>
+</main>
+</body>
+</html>
