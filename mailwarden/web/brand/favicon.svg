@@ -1,0 +1,21 @@
+<!--
+  Favicon: tiled lockup, drawn for 16px.
+
+  Deliberately NOT mark.svg scaled down — that version's 7-unit strokes and
+  second sparkle turn to grey mush below about 24px. This one fills more of the
+  tile, thickens strokes to 9, and keeps a single sparkle.
+
+  The tile is kept because a browser tab shows the icon against light chrome in
+  one theme and dark in the other; an untiled white mark vanishes on the light one.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"
+     role="img" aria-label="Mailwarden">
+  <rect width="100" height="100" rx="22" fill="#0b0b0b"/>
+  <rect x="13" y="27" width="61" height="46" rx="8"
+        stroke="#fff" stroke-width="10" fill="none"/>
+  <path d="M17 32l24 18a5 5 0 0 0 6 0l24-18"
+        stroke="#fff" stroke-width="10" fill="none"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="#fff"
+        d="M80 45C80 59 78 61 64 61C78 61 80 63 80 77C80 63 82 61 96 61C82 61 80 59 80 45Z"/>
+</svg>

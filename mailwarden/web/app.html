@@ -4,6 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Mailwarden</title>
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
+<meta name="theme-color" content="#0b0b0b" />
 <style>
   :root {
     --bg:#fbfbfa; --surface:#fff; --raised:#f4f3f0; --border:#e6e4e0;
@@ -31,7 +33,9 @@
     display:flex; align-items:center; justify-content:space-between;
     margin-bottom:32px; gap:12px; flex-wrap:wrap;
   }
-  .logo { font-weight:700; letter-spacing:-0.02em; font-size:1.05rem; }
+  /* Wordmark is drawn in the SVG, so the tracking survives any font stack. */
+  .logo { display:flex; align-items:center; gap:9px; color:var(--text); }
+  .logo svg { height:26px; width:auto; display:block; }
   .plan { font-size:.82rem; color:var(--muted); }
   h1 { font-size:clamp(1.5rem, 4vw, 2.1rem); letter-spacing:-0.025em; margin:0 0 8px; line-height:1.2; }
   .sub { color:var(--muted); margin:0 0 28px; font-size:1.02rem; }
@@ -202,7 +206,17 @@
 
 <div class="wrap">
   <header>
-    <span class="logo">Mailwarden</span>
+    <span class="logo">
+      <!-- Inlined rather than <img src>: it inherits currentColor, so the mark
+           flips with the theme instead of needing a light and a dark file. -->
+      <svg viewBox="0 0 430 100" fill="none" role="img" aria-label="Mailwarden">
+  <rect x="4" y="22" width="68" height="52" rx="9" stroke="currentColor" stroke-width="7"/>
+  <path d="M8 27l27 22a5 5 0 0 0 6 0l27-22" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="currentColor" d="M80 47C80 60 78 62 65 62C78 62 80 64 80 77C80 64 82 62 95 62C82 62 80 60 80 47Z"/>
+  <path fill="currentColor" d="M92 72.5C92 78 91 79 85.5 79C91 79 92 80 92 85.5C92 80 93 79 98.5 79C93 79 92 78 92 72.5Z"/>
+        <text x="118" y="62" fill="currentColor" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, sans-serif" font-size="29" font-weight="500" letter-spacing="6.5">MAILWARDEN</text>
+      </svg>
+    </span>
     <span class="plan" id="plan"></span>
   </header>
 

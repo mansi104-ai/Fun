@@ -1,0 +1,29 @@
+<!--
+  Horizontal lockup: mark + wordmark, for page headers.
+
+  The wordmark is live text in a system font stack, not outlined paths. The app
+  CSP is `default-src 'self'` with no font-src, so a hosted webfont would be
+  blocked outright, and self-hosting one to render eleven letters is not worth
+  the bytes on a page that loads before a multi-minute scan.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 430 100" fill="none"
+     role="img" aria-label="Mailwarden">
+  <!--
+    Self-contained theming. An SVG loaded via <img src> is an isolated document:
+    currentColor cannot reach the host page and falls back to black, which is
+    invisible on a dark background. These rules give the file its own sensible
+    default in both themes, so it is safe to use standalone.
+
+    Inlining it into the HTML still wins, because then it tracks the page palette
+    exactly rather than approximating it — that is what the two headers do.
+  -->
+  <style>
+    svg { color: #0b0b0b; }
+    @media (prefers-color-scheme: dark) { svg { color: #f0eeea; } }
+  </style>
+  <rect x="4" y="22" width="68" height="52" rx="9" stroke="currentColor" stroke-width="7"/>
+  <path d="M8 27l27 22a5 5 0 0 0 6 0l27-22" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="currentColor" d="M80 47C80 60 78 62 65 62C78 62 80 64 80 77C80 64 82 62 95 62C82 62 80 60 80 47Z"/>
+  <path fill="currentColor" d="M92 72.5C92 78 91 79 85.5 79C91 79 92 80 92 85.5C92 80 93 79 98.5 79C93 79 92 78 92 72.5Z"/>
+  <text x="118" y="62" fill="currentColor" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, sans-serif" font-size="29" font-weight="500" letter-spacing="6.5">MAILWARDEN</text>
+</svg>
