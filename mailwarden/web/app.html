@@ -5,25 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Mailwarden</title>
 <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
-<meta name="theme-color" content="#0b0b0b" />
+<meta name="theme-color" content="#0a0a0a" />
+<link rel="stylesheet" href="/brand.css" />
 <style>
-  :root {
-    --bg:#fbfbfa; --surface:#fff; --raised:#f4f3f0; --border:#e6e4e0;
-    --text:#1a1917; --muted:#6b6862;
-    --accent:#2f5d50; --accent-fg:#fff; --accent-soft:#e8f0ec;
-    --danger:#a33b2a; --warn:#8a6516; --safe:#2f5d50;
-    --radius:14px;
-    --brand-tile:#141311; --brand-ink:#ffffff;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg:#151412; --surface:#1e1d1a; --raised:#26241f; --border:#33312d;
-      --text:#f0eeea; --muted:#9c988f;
-      --accent:#6fae9b; --accent-fg:#10201b; --accent-soft:#22322c;
-      --danger:#e2836f; --warn:#d6a94a; --safe:#6fae9b;
-      --brand-tile:#f0eeea; --brand-ink:#141311;
-    }
-  }
   * { box-sizing:border-box; }
   body {
     margin:0; background:var(--bg); color:var(--text);
@@ -278,15 +262,17 @@
          a control. -->
     <button class="logo" id="goHome" title="Back to all categories">
       <span class="logo-tile" aria-hidden="true">
-        <svg viewBox="0 0 100 100" fill="none">
-          <rect x="18" y="30" width="64" height="44" rx="8"
-                stroke="currentColor" stroke-width="8"/>
-          <path d="M22 34l24 18a5 5 0 0 0 8 0l24-18"
-                stroke="currentColor" stroke-width="8"
-                stroke-linecap="round" stroke-linejoin="round"/>
+        <svg viewBox="0 0 100 100" fill="none" aria-hidden="true">
+          <path d="M50 8 L86 22 v30 c0 22-16 33-36 40C30 85 14 74 14 52 V22 Z"
+                stroke="currentColor" stroke-width="7"
+                stroke-linejoin="round" fill="none"/>
+          <path d="M32 40h36v22H32z" stroke="currentColor" stroke-width="6"
+                stroke-linejoin="round"/>
+          <path d="M33 41l15 12a4 4 0 0 0 4 0l15-12" stroke="currentColor"
+                stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </span>
-      <span class="logo-word">Mailwarden</span>
+      <span class="logo-word">mailwarden</span>
     </button>
     <span class="plan" id="plan"></span>
   </header>

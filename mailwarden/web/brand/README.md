@@ -45,7 +45,7 @@ Drop them in this directory and they are served automatically —
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
 ```
 
-## Colour
+## Colour (superseded — see docs/09-brand.md and web/brand.css)
 
 The tile is `#0b0b0b`, not pure `#000` — pure black on an OLED panel makes the
 rounded corners disappear against a dark page background, and the tile stops

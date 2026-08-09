@@ -1,0 +1,189 @@
+/*
+ * BBI brand tokens — the single source of truth for Mailwarden's appearance.
+ *
+ * Previously every page carried its own :root block, so the palette existed in
+ * four places and could drift in four directions. Everything visual now comes
+ * from here.
+ *
+ * Palette from the BBI kit:
+ *   #0A0A0A  ink        #FFFFFF  paper
+ *   #2B2B2B  graphite   #E5E5E5  mist
+ *   #D4AF37  gold       — the single accent
+ */
+
+:root {
+  /* ── Raw brand colours. Never referenced directly outside this file. ── */
+  --bbi-ink: #0a0a0a;
+  --bbi-paper: #ffffff;
+  --bbi-graphite: #2b2b2b;
+  --bbi-mist: #e5e5e5;
+  --bbi-gold: #d4af37;
+
+  /*
+   * Gold fails contrast as TEXT on white — #D4AF37 on #FFFFFF is about 2:1,
+   * well under the 4.5:1 needed. It is excellent as a BACKGROUND with ink on
+   * top (~9.8:1). So the accent splits in two: a fill, and a darker bronze for
+   * accent text on light surfaces. Using the raw gold for link text would look
+   * on-brand and be unreadable.
+   */
+  --bbi-bronze: #7a5f14;
+
+  /* ── Light theme ─────────────────────────────────────────────────── */
+  --bg: #fbfbfa;
+  --surface: var(--bbi-paper);
+  --raised: #f4f3f0;
+  --border: var(--bbi-mist);
+  --text: var(--bbi-ink);
+  --muted: #6b6862;
+
+  --accent: var(--bbi-gold);        /* fills: buttons, highlights */
+  --accent-fg: var(--bbi-ink);      /* text ON an accent fill */
+  --accent-text: var(--bbi-bronze); /* accent-coloured TEXT */
+  --accent-soft: #fbf4de;
+
+  --danger: #a33b2a;
+  --warn: #8a6516;
+  --safe: #2f6b4f;
+
+  --brand-tile: var(--bbi-ink);
+  --brand-ink: var(--bbi-gold);
+
+  --radius: 14px;
+
+  /*
+   * Playfair Display is the BBI heading face. It is NOT loaded: the app's CSP
+   * is `default-src 'self'` with no font-src, so Google Fonts is blocked
+   * outright, and self-hosting needs the woff2 files committed to web/fonts/.
+   * Until then this stack falls back to a high-contrast serif with similar
+   * proportions. Drop the files in and the @font-face below starts working
+   * with no other change.
+   */
+  --font-display: "Playfair Display", "Iowan Old Style", "Palatino Linotype",
+    Palatino, Georgia, "Times New Roman", serif;
+  --font-body: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: var(--bbi-ink);
+    --surface: #151515;
+    --raised: var(--bbi-graphite);
+    --border: #333333;
+    --text: #f2f0ec;
+    --muted: #9c988f;
+
+    /* On ink, the full gold clears 9:1 — no bronze substitute needed. */
+    --accent: var(--bbi-gold);
+    --accent-fg: var(--bbi-ink);
+    --accent-text: var(--bbi-gold);
+    --accent-soft: #2a2314;
+
+    --danger: #e2836f;
+    --warn: #d6a94a;
+    --safe: #6fae9b;
+
+    --brand-tile: var(--bbi-gold);
+    --brand-ink: var(--bbi-ink);
+  }
+}
+
+/*
+ * Self-hosted display face. Inert until the files exist — a missing src makes
+ * the browser fall through to the next family in --font-display rather than
+ * render nothing. See web/brand/README.md for what to drop in.
+ */
+@font-face {
+  font-family: "Playfair Display";
+  src: url("/fonts/playfair-display-600.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+
+/* ── Base ──────────────────────────────────────────────────────────── */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, .display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+a { color: var(--accent-text); }
+
+/* ── Brand lockup ──────────────────────────────────────────────────── */
+/*
+ * The BBI kit renders Mailwarden with a shield, not an envelope — "warden"
+ * is the half of the name doing the work, and the shield is what the product
+ * actually promises. The envelope now sits inside it.
+ */
+.brand {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 12px;
+  color: var(--text);
+  text-decoration: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.brand-tile {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: var(--brand-tile);
+  color: var(--brand-ink);
+  flex-shrink: 0;
+}
+.brand-tile svg { width: 26px; height: 26px; display: block; }
+.brand-word {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.22rem;
+  letter-spacing: -0.01em;
+}
+
+/* ── Shared controls ───────────────────────────────────────────────── */
+
+.btn {
+  display: inline-block;
+  text-align: center;
+  background: var(--accent);
+  color: var(--accent-fg);
+  padding: 14px 24px;
+  border-radius: 12px;
+  border: 0;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:hover:not(:disabled) { filter: brightness(1.06); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.ghost {
+  background: none;
+  color: var(--accent-text);
+  border: 1px solid var(--border);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px;
+}
+
+.muted { color: var(--muted); font-size: .92rem; }
+.hidden { display: none !important; }

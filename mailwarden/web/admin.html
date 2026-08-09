@@ -3,19 +3,8 @@
 <title>Mailwarden — operator</title>
 <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
 <meta name="robots" content="noindex" />
+<link rel="stylesheet" href="/brand.css" />
 <style>
-  :root {
-    --bg:#fbfbfa; --surface:#fff; --raised:#f4f3f0; --border:#e6e4e0;
-    --text:#1a1917; --muted:#6b6862; --accent:#2f5d50; --accent-fg:#fff;
-    --warn:#8a6516; --safe:#2f5d50; --radius:12px;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg:#151412; --surface:#1e1d1a; --raised:#26241f; --border:#33312d;
-      --text:#f0eeea; --muted:#9c988f; --accent:#6fae9b; --accent-fg:#10201b;
-      --warn:#d6a94a; --safe:#6fae9b;
-    }
-  }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text);
          font:15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -46,6 +35,14 @@
 </style>
 
 <div class="wrap">
+  <a class="brand" href="/" style="margin-bottom:26px">
+    <span class="brand-tile" aria-hidden="true"><svg viewBox="0 0 100 100" fill="none" aria-hidden="true">
+        <path d="M50 8 L86 22 v30 c0 22-16 33-36 40C30 85 14 74 14 52 V22 Z" stroke="currentColor" stroke-width="7" stroke-linejoin="round" fill="none"/>
+        <path d="M32 40h36v22H32z" stroke="currentColor" stroke-width="6" stroke-linejoin="round"/>
+        <path d="M33 41l15 12a4 4 0 0 0 4 0l15-12" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg></span>
+    <span class="brand-word">mailwarden</span>
+  </a>
   <h1>Operator</h1>
   <p class="muted" id="who">Checking access…</p>
 
