@@ -94,12 +94,12 @@ async function goTab(next) {
   tab = next;
   renderTabs();
   if (next === "overview") return renderOverview();
-  if (next === "clean") return renderList("safe");
-  if (next === "review") return renderList("review");
-  if (next === "protected") return renderProtected();
-  if (next === "history") return renderHistory();
-  if (next === "unsub") return renderUnsub();
-  if (next === "settings") return renderSettings();
+  if (next === "clean") return guarded(renderList)("safe");
+  if (next === "review") return guarded(renderList)("review");
+  if (next === "protected") return guarded(renderProtected)();
+  if (next === "history") return guarded(renderHistory)();
+  if (next === "unsub") return guarded(renderUnsub)();
+  if (next === "settings") return guarded(renderSettings)();
 }
 
 $("goHome").onclick = async () => {
@@ -148,6 +148,15 @@ function renderProgress(p) {
     : `Reading headers — ${fmt.format(p.scanned)} messages, ${mb(p.bytes)} analysed`;
 }
 
+function scanFailed(detail) {
+  const expired = /reconnect|token|invalid_grant|unauthor/i.test(String(detail));
+  $("ticker").innerHTML = expired
+    ? 'The Gmail connection expired mid-scan. Nothing was changed. <a href="/auth/google">Reconnect and try again</a>.'
+    : "The scan stopped early. Nothing was changed — try again, and tell us if it repeats.";
+  $("startScan").disabled = false;
+  $("startScan").textContent = "Try again";
+}
+
 function streamProgress() {
   if (typeof EventSource === "undefined") return pollProgress();
   const es = new EventSource("/api/scan/stream");
@@ -156,7 +165,7 @@ function streamProgress() {
     renderProgress(p);
     if (p.done && p.state !== "running") {
       es.close();
-      if (p.error) { $("ticker").textContent = `Scan failed: ${p.error}`; return; }
+      if (p.error) return scanFailed(p.error);
       await loadOverview();
     }
   };
@@ -167,11 +176,66 @@ async function pollProgress() {
   const p = await api("/api/scan/progress");
   renderProgress(p);
   if (p.done && p.state !== "running") {
-    if (p.error) { $("ticker").textContent = `Scan failed: ${p.error}`; return; }
+    if (p.error) return scanFailed(p.error);
     return loadOverview();
   }
   setTimeout(pollProgress, 1200);
 }
+
+// ── Errors ───────────────────────────────────────────────────────────
+
+/**
+ * Turns a server error into something a person can act on. Raw messages are
+ * never shown: they leak implementation detail and tell the user nothing about
+ * what to do next.
+ *
+ * "reconnect_required" is the one every beta user WILL hit — Google expires
+ * refresh tokens for apps still under review — so it gets its own reassurance
+ * that nothing was changed.
+ */
+function errorScreen(err) {
+  const code = err.data?.error;
+  const reconnect = code === "reconnect_required";
+  const noAccount = code === "no_account_connected";
+
+  let title, body, action = null;
+  if (reconnect) {
+    title = "Gmail needs reconnecting";
+    body = "Google expires the connection periodically while an app is still under review. Nothing was changed, and nothing was lost.";
+    action = ["Reconnect Gmail", "/auth/google"];
+  } else if (noAccount) {
+    title = "No Gmail account connected";
+    body = "Connect an account to get started.";
+    action = ["Connect Gmail", "/auth/google"];
+  } else if (err.status === 402) {
+    title = "You have used your free cleanup";
+    body = err.data?.message ?? "Upgrade to keep going.";
+    action = ["See plans", "/pricing.html"];
+  } else if (err.status >= 500) {
+    title = "Something went wrong on our side";
+    body = "This has been logged. Trying again usually works — if it keeps happening, tell us.";
+  } else {
+    title = "Could not load that";
+    body = "Check your connection and try again.";
+  }
+
+  show("list");
+  $("list").innerHTML = `
+    <div class="empty">
+      <h2>${esc(title)}</h2>
+      <p class="lede">${esc(body)}</p>
+      <div class="row" style="justify-content:center">
+        ${action ? `<a class="btn" href="${action[1]}">${esc(action[0])}</a>` : ""}
+        <button id="errRetry">Try again</button>
+      </div>
+    </div>`;
+  $("errRetry").onclick = () => location.reload();
+}
+
+/** Wraps a section renderer so no tab can ever fail silently. */
+const guarded = (fn) => async (...args) => {
+  try { await fn(...args); } catch (err) { errorScreen(err); }
+};
 
 // ── Overview ─────────────────────────────────────────────────────────
 
@@ -895,8 +959,11 @@ $("closeReader").onclick = () => $("readerDialog").close();
     isDemo = me.demo === true;
     if (isDemo) $("demoBanner").classList.remove("hidden");
     $("plan").textContent = `${me.user.email} · ${me.user.plan}`;
-    if (me.account?.last_sync_at) await loadOverview();
-    else show("scan");
+    if (me.account?.last_sync_at) {
+      try { await loadOverview(); } catch (err) { errorScreen(err); }
+    } else {
+      show("scan");
+    }
   } catch {
     window.location.href = "/";
   }

@@ -1,0 +1,131 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacy — Mailwarden</title>
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+<meta name="theme-color" content="#0a0a0a" />
+<link rel="stylesheet" href="/brand.css" />
+<style>
+  .brand { margin-bottom: 28px; }
+  ul { padding-left: 20px; margin: 0 0 14px; }
+  li { margin-bottom: 7px; }
+  h2 { margin-top: 34px; }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; margin: 12px 0 18px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  code { background: var(--raised); padding: 2px 6px; border-radius: 5px; font-size: .88em; }
+</style>
+
+<main class="wrap">
+  <a class="brand" href="/" aria-label="Mailwarden home">
+    <span class="brand-tile" aria-hidden="true">
+      <svg viewBox="0 0 100 100" fill="none">
+        <rect x="18" y="30" width="64" height="44" rx="8" stroke="currentColor" stroke-width="8"/>
+        <path d="M22 34l24 18a5 5 0 0 0 8 0l24-18" stroke="currentColor" stroke-width="8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    <span class="brand-word">mailwarden</span>
+  </a>
+
+  <h1>Privacy</h1>
+  <p class="lede">
+    This describes what Mailwarden actually does, verifiable against the source at
+    <a href="https://github.com/mansi104-ai/Fun">github.com/mansi104-ai/Fun</a>.
+    Every claim below corresponds to code, not intention.
+  </p>
+  <p class="muted">Last updated 10 August 2026.</p>
+
+  <h2>What Mailwarden can and cannot do</h2>
+  <p>
+    Mailwarden requests exactly two Google permissions:
+  </p>
+  <table>
+    <tr><th>Scope</th><th>What it allows</th></tr>
+    <tr>
+      <td><code>gmail.modify</code></td>
+      <td>Read mail, and move it between labels — archive, label, move to trash.
+      <strong>It cannot permanently delete anything.</strong> Google does not grant
+      that ability with this scope.</td>
+    </tr>
+    <tr>
+      <td><code>userinfo.email</code></td>
+      <td>Your email address, so your account can be identified.</td>
+    </tr>
+  </table>
+  <p>
+    Mailwarden deliberately does <strong>not</strong> request
+    <code>https://mail.google.com/</code> (permanent deletion) or
+    <code>gmail.send</code> (sending mail as you).
+  </p>
+
+  <h2>What is stored</h2>
+  <p>Sorting your mail uses message headers only. Per message we store:</p>
+  <ul>
+    <li>The sender's address and display name</li>
+    <li>Date, size in bytes, and Gmail's own label IDs</li>
+    <li>A <strong>salted hash</strong> of the subject — never the subject itself</li>
+    <li>Whether an unsubscribe header and an attachment are present</li>
+  </ul>
+  <p>We do <strong>not</strong> store message bodies, readable subject lines, or recipient
+  addresses. There is no database column that could hold them.</p>
+
+  <h2>Reading a message</h2>
+  <p>
+    When you click to read a specific email, Mailwarden fetches it from Gmail and shows
+    it to you. That content is <strong>never written to the database, never logged, and
+    never sent to an AI model.</strong> Closing the reader discards it. Each read is
+    recorded in your audit log by message ID only.
+  </p>
+
+  <h2>AI and third parties</h2>
+  <p>
+    Classification runs on aggregate statistics about <em>senders</em> — message counts,
+    unread rates, subject-template ratios, domains. <strong>No message content is ever
+    transmitted to a model.</strong> Where a model is used, the request goes to OpenRouter
+    (free tier) or Anthropic (paid tier), carrying only those aggregate figures.
+  </p>
+
+  <h2>Selling data</h2>
+  <p>
+    We do not sell your data or your metadata, and we do not advertise against it.
+    That is not merely a policy — the business model is one-time and subscription
+    payments, and the architecture does not retain enough to sell.
+  </p>
+
+  <h2>Security</h2>
+  <ul>
+    <li>Your Google refresh token is encrypted at rest with AES-256-GCM.</li>
+    <li>All traffic is HTTPS; HSTS is enforced.</li>
+    <li>Every action against your mailbox is written to an audit log you can read at
+    <code>/api/audit</code>.</li>
+  </ul>
+  <p class="muted">
+    Known limitation, stated rather than hidden: the token encryption key is currently
+    held as an environment variable on the host rather than in a managed key service.
+    Migrating it is tracked work.
+  </p>
+
+  <h2>Deleting your data</h2>
+  <p>
+    Disconnecting revokes the Google token and purges your stored metadata within 24
+    hours. Mail already archived or trashed stays wherever it is in Gmail — Mailwarden
+    moving out of your life does not move your mail back, so undo anything you want
+    reversed first.
+  </p>
+
+  <h2>Where it runs</h2>
+  <p>
+    Mailwarden runs on Fly.io in Singapore (<code>sin</code>). Data is stored on an
+    encrypted volume in that region.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Questions or a deletion request: <a href="mailto:mkb.kalra@gmail.com">mkb.kalra@gmail.com</a>.
+  </p>
+
+  <p class="muted" style="margin-top:30px">
+    <a href="/">Back to Mailwarden</a> · <a href="/terms.html">Terms</a>
+  </p>
+</main>
