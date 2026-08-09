@@ -18,12 +18,7 @@ form.onsubmit = async (e) => {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.message || data.error || "That address did not look right.");
-    // Say what happens next and roughly when. "We'll be in touch" is where
-    // leads go to be forgotten.
-    msg.innerHTML =
-      `<b>You're on the list.</b> ${data.waiting} ahead of you. ` +
-      `We add seats by hand — you'll get an email with a link and a heads-up ` +
-      `about Google's "unverified app" warning, which is just the review still running.`;
+    msg.innerHTML = "<b>You're on the list.</b> We'll email you when your seat is ready.";
     form.hidden = true;
   } catch (err) {
     msg.textContent = err.message;
