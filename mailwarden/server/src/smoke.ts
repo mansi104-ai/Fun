@@ -23,7 +23,8 @@ import { planBatch } from "./gmail/executor.js";
 import { aggregateSenders } from "./gmail/sync.js";
 import { isPubliclyRoutable, parseTargets } from "./gmail/unsubscribe.js";
 import { newId } from "./lib/crypto.js";
-import { FOUNDING_SEATS, foundingSeatsSold, requestAccess } from "./lib/billing.js";
+import { config } from "./config.js";
+import { directPayInfo, FOUNDING_SEATS, foundingSeatsSold, grantManual, isAdmin, requestAccess } from "./lib/billing.js";
 import { canExecuteBatch, entitlementsFor, setPlan } from "./lib/entitlements.js";
 import { DAY_MS, LIMITS } from "./safety/limits.js";
 import { assertExecutable, evaluate, GuardError, type CandidateMessage } from "./safety/policy.js";
@@ -764,6 +765,35 @@ check("Downgrade takes effect immediately",
   check("A replayed event id cannot be inserted twice", rejected);
   db.prepare(`DELETE FROM stripe_events WHERE id = ?`).run(evt.id);
 }
+
+/**
+ * The manual-grant path hands out paid access on a human decision. Its gate is
+ * the only thing between that and anyone signed in, so the failure mode that
+ * matters is an unset ADMIN_EMAIL being read as "everyone".
+ */
+check("No admin is configured in tests, so nobody is admin",
+  !isAdmin("anyone@example.com") && !isAdmin(config.adminEmail || "x@y.z"));
+check("Admin check rejects undefined", !isAdmin(undefined));
+check("Admin check rejects the empty string", !isAdmin(""));
+
+check("Manual grant refuses an unknown email",
+  !grantManual(billUser, "nobody-here@example.com", "founding", "ref").ok);
+
+check("Manual grant works for a real account", (() => {
+  const r = grantManual(billUser, `${billUser}@test.local`, "founding", "UPI-12345");
+  return r.ok && entitlementsFor(billUser).plan === "founding";
+})());
+check("…and is recorded in the audit log with its reference", (() => {
+  const row = db.prepare(
+    `SELECT detail FROM audit_log WHERE user_id = ? AND action = 'billing.granted_manually'
+     ORDER BY created_at DESC LIMIT 1`,
+  ).get(billUser) as { detail: string } | undefined;
+  return Boolean(row && row.detail.includes("UPI-12345"));
+})());
+setPlan(billUser, "free");
+
+check("UPI link is withheld when no payee is configured",
+  config.direct.upiId ? true : directPayInfo(4200).enabled === false);
 
 check("Access requests accept a real address", requestAccess("buyer@example.com", null, "test"));
 check("…and reject a malformed one", !requestAccess("not-an-email", null, "test"));

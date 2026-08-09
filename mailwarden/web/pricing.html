@@ -96,6 +96,32 @@
     </p>
   </div>
 
+  <!-- Direct payment. Hidden entirely unless a UPI id is configured, so the
+       page never advertises a channel that does not work. -->
+  <div class="card hidden" id="directCard">
+    <h2 style="margin:0 0 6px">Paying from India? Use UPI</h2>
+    <p class="muted" style="margin:0 0 14px">
+      UPI carries no processing fee, so every rupee reaches the product instead
+      of a card network. We confirm it by hand — usually within a few hours.
+    </p>
+    <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap">
+      <div>
+        <div class="muted">Pay</div>
+        <div style="font-size:1.6rem; font-weight:720" id="directAmount"></div>
+      </div>
+      <div style="flex:1; min-width:200px">
+        <div class="muted">to</div>
+        <div style="font-family:ui-monospace,monospace; font-size:1.05rem" id="directUpi"></div>
+      </div>
+    </div>
+    <a class="btn" id="directPay" href="#">Open UPI app</a>
+    <p class="muted" style="margin:12px 0 0">
+      After paying, sign in with the Gmail address you want cleaned and email us
+      the UPI reference. Your seat is activated manually — which is also when we
+      add you to Google's tester list, so it is the same step either way.
+    </p>
+  </div>
+
   <!-- Why 100 is a real number, not scarcity theatre. This paragraph is the
        most persuasive thing on the page precisely because it is a limitation
        being admitted rather than a benefit being claimed. -->

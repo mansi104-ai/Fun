@@ -94,4 +94,26 @@ $("waitForm").onsubmit = async (e) => {
   }
 };
 
+/**
+ * Direct payment (UPI). Shown only when the server has a payee configured —
+ * advertising a payment channel that is not set up is worse than not offering
+ * one, because it fails after the buyer has already decided to pay.
+ */
+async function loadDirect() {
+  try {
+    const d = await api("/api/billing/direct");
+    if (!d.enabled) return;
+
+    $("directAmount").textContent = `₹${Number(d.amountInr).toLocaleString("en-IN")}`;
+    $("directUpi").textContent = d.upiId;
+    // The deep link only resolves on a device with a UPI app installed; on
+    // desktop the id above is the fallback, which is why both are shown.
+    $("directPay").href = d.upiUri;
+    $("directCard").classList.remove("hidden");
+  } catch {
+    /* direct pay simply stays hidden */
+  }
+}
+
 loadPrices();
+loadDirect();

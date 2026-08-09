@@ -263,6 +263,87 @@ function grant(s: Stripe.Checkout.Session): { applied: boolean; reason: string }
   return { applied: true, reason: `granted ${plan}` };
 }
 
+// ── Direct payment (zero processor fee) ──────────────────────────────────
+
+/**
+ * UPI and bank transfer carry no merchant discount rate in India, so a founding
+ * seat bought this way costs 0% rather than ~3.5% through a card processor. On
+ * a $1,800 funding target that is the difference between keeping $1,800 and
+ * keeping $1,736.
+ *
+ * The catch is that nothing confirms the payment automatically — the operator
+ * has to look at their bank and then grant the seat. That is normally a bad
+ * trade, and here it is not: **every buyer must already be added to the Google
+ * Test users list by hand**, so the operator is in the loop for all 100 sales
+ * regardless. Manual reconciliation adds a few seconds to a step that already
+ * exists.
+ *
+ * This stops being sensible the moment volume outgrows the 100-seat cap, which
+ * is exactly when Stripe's automation starts being worth its fee.
+ */
+export interface DirectPayInfo {
+  enabled: boolean;
+  upiId: string;
+  payeeName: string;
+  note: string;
+  /** Pre-filled UPI deep link, so a phone opens straight into the payment. */
+  upiUri: string;
+}
+
+export function directPayInfo(amountInr: number): DirectPayInfo {
+  const { upiId, payeeName, note } = config.direct;
+  if (!upiId) {
+    return { enabled: false, upiId: "", payeeName, note, upiUri: "" };
+  }
+  const params = new URLSearchParams({
+    pa: upiId,
+    pn: payeeName,
+    am: String(amountInr),
+    cu: "INR",
+    tn: note || "Mailwarden Founding 100",
+  });
+  return { enabled: true, upiId, payeeName, note, upiUri: `upi://pay?${params}` };
+}
+
+export function isAdmin(email: string | undefined): boolean {
+  // An unset ADMIN_EMAIL must mean "nobody", never "everybody".
+  if (!config.adminEmail || !email) return false;
+  return email.trim().toLowerCase() === config.adminEmail;
+}
+
+/**
+ * Grants a plan to an email address after payment was confirmed out of band.
+ *
+ * Deliberately records who granted it and against what reference, because this
+ * is the one path where money and access are linked by a human decision rather
+ * than by a processor's webhook. If it is ever disputed, the audit log is the
+ * only evidence there is.
+ */
+export function grantManual(
+  adminUserId: string,
+  email: string,
+  plan: Plan,
+  reference: string,
+): { ok: boolean; reason: string } {
+  const target = db.prepare(`SELECT id, plan FROM users WHERE lower(email) = ?`).get(
+    email.trim().toLowerCase(),
+  ) as { id: string; plan: Plan } | undefined;
+
+  if (!target) {
+    return { ok: false, reason: "No account with that email has signed in yet." };
+  }
+  if (plan === "founding" && target.plan !== "founding") {
+    const sold = foundingSeatsSold();
+    if (sold >= FOUNDING_SEATS) return { ok: false, reason: "All 100 founding seats are taken." };
+    db.prepare(`UPDATE users SET founding_seat = ? WHERE id = ?`).run(sold + 1, target.id);
+  }
+
+  setPlan(target.id, plan);
+  audit(adminUserId, "billing.granted_manually", { email, plan, reference });
+  audit(target.id, "billing.purchased", { plan, method: "direct", reference });
+  return { ok: true, reason: `Granted ${plan} to ${email}.` };
+}
+
 // ── Access requests ──────────────────────────────────────────────────────
 
 /**

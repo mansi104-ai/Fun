@@ -12,8 +12,12 @@ import {
   requestAccess,
   SoldOutError,
   verifyWebhook,
+  directPayInfo,
+  grantManual,
+  isAdmin,
   type PriceId,
 } from "../lib/billing.js";
+import type { Plan } from "../lib/entitlements.js";
 import { currentUserId } from "./auth.js";
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
@@ -99,6 +103,51 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(500).send({ error: "apply_failed" });
     }
   });
+
+  /**
+   * Direct payment details — UPI or bank transfer, which carry no processor
+   * fee. Public, because the whole point is that a buyer can see it before
+   * signing in.
+   *
+   * The INR figure is a display convenience, not an exchange rate: keep
+   * DIRECT_PAY_INR in step with the dollar price, or charge in INR outright.
+   */
+  app.get("/api/billing/direct", async () => {
+    const inr = Number(process.env.DIRECT_PAY_INR ?? "4200");
+    return { ...directPayInfo(inr), amountInr: inr };
+  });
+
+  /**
+   * Grant a plan by hand, after confirming payment arrived.
+   *
+   * Restricted to ADMIN_EMAIL. This is the only path where access is granted by
+   * a human decision rather than a processor's webhook, so it is audited on
+   * both sides — who granted it, and what the payment reference was.
+   */
+  app.post<{ Body: { email?: string; plan?: string; reference?: string } }>(
+    "/api/billing/grant",
+    async (req, reply) => {
+      const userId = currentUserId(req.cookies);
+      if (!userId) return reply.code(401).send({ error: "not_authenticated" });
+
+      const me = db.prepare(`SELECT email FROM users WHERE id = ?`).get(userId) as
+        | { email: string }
+        | undefined;
+      if (!isAdmin(me?.email)) return reply.code(403).send({ error: "forbidden" });
+
+      const { email, plan = "founding", reference = "" } = req.body ?? {};
+      if (typeof email !== "string" || !email.includes("@")) {
+        return reply.code(400).send({ error: "invalid_email" });
+      }
+      if (!["founding", "starter", "pro", "free"].includes(plan)) {
+        return reply.code(400).send({ error: "invalid_plan" });
+      }
+
+      const result = grantManual(userId, email, plan as Plan, String(reference).slice(0, 200));
+      if (!result.ok) return reply.code(409).send({ error: "grant_failed", message: result.reason });
+      return result;
+    },
+  );
 
   /**
    * Access requests, captured while Google's 100-user Testing cap binds.

@@ -78,6 +78,27 @@ export const config = {
     pricePro: process.env.STRIPE_PRICE_ID_PRO ?? "",
   },
 
+  /**
+   * Direct payment, which carries no processor fee at all.
+   *
+   * UPI has zero merchant discount rate in India by regulation, so a founding
+   * seat bought this way costs 0% instead of ~3.5%. It requires the operator to
+   * confirm the payment by hand — which is free, because every buyer already
+   * has to be added to the Google Test users list manually.
+   */
+  direct: {
+    upiId: process.env.DIRECT_UPI_ID ?? "",
+    payeeName: optional("DIRECT_PAYEE_NAME", "Mailwarden"),
+    note: process.env.DIRECT_PAY_NOTE ?? "",
+  },
+
+  /**
+   * The single account allowed to grant plans by hand. Compared case-insensitively
+   * against the signed-in user email. Empty disables manual granting entirely,
+   * which is the correct default: an unset admin must never mean "anyone".
+   */
+  adminEmail: (process.env.ADMIN_EMAIL ?? "").trim().toLowerCase(),
+
   databasePath: optional("DATABASE_PATH", "./mailwarden.db"),
 
   /** Gmail messages.get quota is the sync bottleneck; keep concurrency modest. */
