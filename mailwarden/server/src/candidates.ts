@@ -29,9 +29,13 @@ export function candidatesFor(
   const stateFilter =
     action === "archive" ? `labels LIKE '%INBOX%'` : `labels NOT LIKE '%TRASH%'`;
 
+  // thread_id and has_attachment are NOT optional extras: the per-message
+  // guards in policy.ts read them, and a query that omits them makes those
+  // guards silently pass everything. Any new candidate query must select them.
   return db
     .prepare(
-      `SELECT message_id, sender_key, labels, size_bytes, internal_date
+      `SELECT message_id, sender_key, labels, size_bytes, internal_date,
+              thread_id, has_attachment
        FROM messages_meta
        WHERE account_id = ? AND sender_key IN (${placeholders})
          AND ${stateFilter}`,

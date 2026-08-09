@@ -140,18 +140,40 @@ export async function executeBatch(
     .all(batchId) as { message_id: string; sender_key: string; prior_labels: string }[];
 
   // ── Re-validate against current state ────────────────────────────────
-  const candidates: CandidateMessage[] = items.map((i) => ({
-    message_id: i.message_id,
-    sender_key: i.sender_key,
-    labels: i.prior_labels,
-    size_bytes: 0,
-    internal_date:
-      (
-        db
-          .prepare(`SELECT internal_date FROM messages_meta WHERE account_id = ? AND message_id = ?`)
-          .get(accountId, i.message_id) as { internal_date: number } | undefined
-      )?.internal_date ?? 0,
-  }));
+  //
+  // Read straight from messages_meta rather than reconstructing from
+  // batch_items. The per-message guards need thread_id and has_attachment, and
+  // a re-validation missing those fields would be weaker than the plan-time
+  // check it exists to double — the exact shape of hole this step prevents.
+  // (It also replaces an N+1 query with one.)
+  const metaById = new Map(
+    (
+      db
+        .prepare(
+          `SELECT message_id, sender_key, labels, size_bytes, internal_date,
+                  thread_id, has_attachment
+           FROM messages_meta WHERE account_id = ?`,
+        )
+        .all(accountId) as CandidateMessage[]
+    ).map((m) => [m.message_id, m]),
+  );
+
+  const candidates: CandidateMessage[] = items.map(
+    (i) =>
+      metaById.get(i.message_id) ?? {
+        // A message we no longer hold metadata for cannot be vouched for.
+        // internal_date 0 makes it look ancient, so the recency guard will not
+        // save it — but every other guard still applies, and UNKNOWN_SENDER
+        // will fire if its sender is gone too.
+        message_id: i.message_id,
+        sender_key: i.sender_key,
+        labels: i.prior_labels,
+        size_bytes: 0,
+        internal_date: 0,
+        thread_id: null,
+        has_attachment: 0,
+      },
+  );
 
   let verdict: GuardVerdict;
   try {

@@ -530,6 +530,80 @@ check("An unknown category id is rejected",
 db.prepare(`DELETE FROM users WHERE id = ?`).run(catUser);
 db.prepare(`DELETE FROM messages_meta WHERE account_id = ?`).run(catAcct);
 
+// ── 13a. Per-message protection ──────────────────────────────────────────
+
+section("13a. Per-message guards: starred, replied threads, attachments, important");
+
+/**
+ * Every other guard is sender-level, which leaves the hole these close: once a
+ * sender is judged actionable, so is every message they ever sent — including
+ * the one you starred, the one with the invoice attached, and the one in a
+ * thread you wrote in.
+ */
+const msgAcct = newId("acc");
+const msgUser = newId("usr");
+db.prepare(`INSERT INTO users (id, email, plan, created_at, updated_at) VALUES (?,?,?,?,?)`).run(
+  msgUser, `${msgUser}@test.local`, "free", Date.now(), Date.now(),
+);
+db.prepare(
+  `INSERT INTO accounts (id, user_id, email, refresh_token_enc, created_at) VALUES (?,?,?,?,?)`,
+).run(msgAcct, msgUser, "msg@test.local", "x", Date.now());
+db.prepare(
+  `INSERT INTO senders (id, account_id, sender_key, domain, message_count, protected,
+                        user_protected, user_replied, category, confidence)
+   VALUES (?,?,?,?,?,0,0,0,?,?)`,
+).run(newId("snd"), msgAcct, "blast@shop.com", "shop.com", 6, "promotional", 0.95);
+
+{
+  const ins = db.prepare(
+    `INSERT INTO messages_meta
+       (account_id, message_id, thread_id, sender_key, internal_date, size_bytes,
+        labels, is_unread, has_attachment)
+     VALUES (?,?,?,?,?,?,?,1,?)`,
+  );
+  ins.run(msgAcct, "plain", "t1", "blast@shop.com", OLD, 1000, "INBOX,UNREAD", 0);
+  ins.run(msgAcct, "starred", "t2", "blast@shop.com", OLD, 1000, "INBOX,STARRED", 0);
+  ins.run(msgAcct, "attach", "t3", "blast@shop.com", OLD, 1000, "INBOX", 1);
+  ins.run(msgAcct, "important", "t4", "blast@shop.com", OLD, 1000, "INBOX,IMPORTANT", 0);
+  ins.run(msgAcct, "inthread", "t5", "blast@shop.com", OLD, 1000, "INBOX", 0);
+  // The user's own reply, which makes thread t5 a conversation.
+  ins.run(msgAcct, "myreply", "t5", "me@test.local", OLD, 500, "SENT", 0);
+}
+
+const msgCandidates = candidatesFor(msgAcct, ["blast@shop.com"], "trash");
+const trashVerdict = evaluate({
+  accountId: msgAcct, action: "trash", senderKeys: ["blast@shop.com"],
+  candidates: msgCandidates, confirmed: true,
+});
+const trashOk = new Set(trashVerdict.allowed.map((c) => c.message_id));
+
+check("Starred mail is never trashed", !trashOk.has("starred"));
+check("Mail in a thread you replied to is never trashed", !trashOk.has("inthread"));
+check("Mail with an attachment is never trashed", !trashOk.has("attach"));
+check("Gmail-important mail is never trashed", !trashOk.has("important"));
+check("Ordinary bulk mail still is", trashOk.has("plain"));
+
+const archiveVerdict = evaluate({
+  accountId: msgAcct, action: "archive", senderKeys: ["blast@shop.com"],
+  candidates: candidatesFor(msgAcct, ["blast@shop.com"], "archive"),
+  confirmed: true,
+});
+const archiveOk = new Set(archiveVerdict.allowed.map((c) => c.message_id));
+
+// Archiving is reversible forever, so the attachment/important guards are
+// scoped to trash. Starred and replied-thread stay absolute.
+check("Starred mail is not archived either", !archiveOk.has("starred"));
+check("Replied threads are not archived either", !archiveOk.has("inthread"));
+check("Attachments CAN be archived — reversible, stays in All Mail", archiveOk.has("attach"));
+check("Important mail CAN be archived", archiveOk.has("important"));
+
+check("Each protection is reported to the user",
+  ["STARRED", "IN_REPLIED_THREAD", "HAS_ATTACHMENT", "GMAIL_IMPORTANT"].every((code) =>
+    trashVerdict.exclusions.some((e) => e.code === code)));
+
+db.prepare(`DELETE FROM users WHERE id = ?`).run(msgUser);
+db.prepare(`DELETE FROM messages_meta WHERE account_id = ?`).run(msgAcct);
+
 // ── 13b. Local mailbox state tracks what we told Gmail to do ─────────────
 
 section("13b. Executing a batch updates our own copy of the mailbox");

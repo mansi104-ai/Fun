@@ -1,5 +1,53 @@
 # The Safety Model
 
+## Per-message protection (added after the first real cleanup)
+
+Every guard in this document except `TOO_RECENT` was originally
+**sender-level**, and that left a genuine hole: once a sender was judged
+actionable, *every* message they had ever sent was actionable with it. For the
+400th identical newsletter that is correct. For the one message in that pile the
+user starred, the one carrying an invoice PDF, and the one sitting in a thread
+they replied to, it is badly wrong.
+
+Four guards now examine individual messages:
+
+| Guard | Protects | Applies to |
+|---|---|---|
+| `STARRED` | Anything the user starred | **all actions** |
+| `IN_REPLIED_THREAD` | Any message in a thread the user wrote in | **all actions** |
+| `HAS_ATTACHMENT` | Messages carrying files | **trash only** |
+| `GMAIL_IMPORTANT` | Gmail's own importance flag | **trash only** |
+
+The split is deliberate. **Archiving is reversible forever** — archived mail
+stays in All Mail and stays searchable — so blocking it for attachments would
+cost the user a clean inbox for no safety gain. **Trash is the only action with
+a deadline**: Gmail permanently removes trashed mail after 30 days, and past
+that nobody can recover it, us included. So the two noisier signals gate
+deletion only.
+
+`STARRED` and `IN_REPLIED_THREAD` are absolute, because both are explicit acts
+by the user rather than inferences about them.
+
+### Thread-level replies, alongside the sender-level ratio
+
+Sender-level reply detection is a **ratio** (≥25%), which correctly refuses to
+lock an entire newsletter over one stray reply — a bug that once made 33% of a
+real mailbox permanently untouchable. But the thread the user actually replied
+in should still never be touched. The thread-level guard closes that gap without
+reopening the other one.
+
+### Attachment detection
+
+Populated from Gmail's own `has:attachment` search during sync, not inferred
+from message size. Size is a poor proxy in exactly the wrong direction:
+image-heavy marketing mail is large and worthless, while a 40 KB PDF invoice is
+small and irreplaceable. The pass lists ids only (500 per page), so it costs a
+handful of calls against a scan already making thousands. If it fails, the scan
+still succeeds and logs loudly — the guard layer treats unknown as "no
+attachment", so the only cost is one lost signal.
+
+---
+
 Everything in this document is enforced in code and covered by tests in
 `server/src/smoke.ts`. If you change a guard, the test suite must change with
 it — that coupling is deliberate.

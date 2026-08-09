@@ -41,6 +41,8 @@ export interface CandidateMessage {
   labels: string;
   size_bytes: number;
   internal_date: number;
+  thread_id?: string | null;
+  has_attachment?: number;
 }
 
 export interface GuardVerdict {
@@ -193,6 +195,97 @@ function guardRecency(candidates: CandidateMessage[], exclusions: Exclusion[]): 
   return excluded;
 }
 
+/**
+ * G9–G12 — PER-MESSAGE protection.
+ *
+ * Every other guard here works at sender level, which leaves a real hole: once
+ * a sender is judged actionable, every message they ever sent is actionable
+ * with it. That is fine for the 400th identical newsletter and badly wrong for
+ * the one message in that pile you starred, the one carrying an invoice PDF,
+ * and the one sitting in a thread you replied to.
+ *
+ * These four look at individual messages instead. Two are absolute; two apply
+ * only to `trash`, because archiving is fully reversible — archived mail stays
+ * in All Mail forever — while trash starts a 30-day clock that ends in real,
+ * unrecoverable deletion by Gmail itself.
+ */
+function guardMessageLevel(
+  accountId: string,
+  action: string,
+  candidates: CandidateMessage[],
+  exclusions: Exclusion[],
+): Set<string> {
+  const excluded = new Set<string>();
+  const tally = new Map<string, { code: string; count: number; reason: string }>();
+
+  const drop = (c: CandidateMessage, code: string, reason: string): void => {
+    excluded.add(c.message_id);
+    const key = `${code}:${c.sender_key}`;
+    const row = tally.get(key) ?? { code, count: 0, reason };
+    row.count += 1;
+    tally.set(key, row);
+  };
+
+  /**
+   * Threads the user has written in. Sender-level reply detection is a ratio
+   * (see sync.ts), which correctly refuses to lock a whole newsletter over one
+   * stray reply — but the thread you actually replied in should still never be
+   * touched. This closes that gap without reopening the other one.
+   */
+  const repliedThreads = new Set(
+    (
+      db
+        .prepare(
+          `SELECT DISTINCT thread_id FROM messages_meta
+           WHERE account_id = ? AND thread_id IS NOT NULL AND labels LIKE '%SENT%'`,
+        )
+        .all(accountId) as { thread_id: string }[]
+    ).map((r) => r.thread_id),
+  );
+
+  for (const c of candidates) {
+    const labels = c.labels.split(",");
+
+    // G9 — an explicit user signal. Nothing outranks the user's own star.
+    if (labels.includes("STARRED")) {
+      drop(c, "STARRED", "You starred these — Mailwarden never touches starred mail.");
+      continue;
+    }
+
+    // G10 — you wrote in this conversation.
+    if (c.thread_id && repliedThreads.has(c.thread_id)) {
+      drop(c, "IN_REPLIED_THREAD", "Part of a conversation you replied to.");
+      continue;
+    }
+
+    // Below here: archive is permitted, trash is not. Archived mail is
+    // recoverable forever; trashed mail is gone in 30 days.
+    if (action !== "trash") continue;
+
+    // G11 — attachments are the things users cannot reproduce.
+    if (c.has_attachment === 1) {
+      drop(c, "HAS_ATTACHMENT", "These carry attachments — archived instead of trashed.");
+      continue;
+    }
+
+    // G12 — Gmail's own importance signal. Noisy enough that it should not
+    // block archiving, strong enough that it should block deletion.
+    if (labels.includes("IMPORTANT")) {
+      drop(c, "GMAIL_IMPORTANT", "Gmail marked these important — archived instead of trashed.");
+    }
+  }
+
+  for (const [key, row] of tally) {
+    exclusions.push({
+      code: row.code,
+      senderKey: key.slice(row.code.length + 1),
+      messageCount: row.count,
+      reason: row.reason,
+    });
+  }
+  return excluded;
+}
+
 /** G5 — volume ceilings, per batch and per rolling day. */
 function guardVelocity(accountId: string, allowed: number, senderCount: number, violations: Violation[]): void {
   if (allowed > LIMITS.maxMessagesPerBatch) {
@@ -290,7 +383,10 @@ export function evaluate(input: GuardInput): GuardVerdict {
     ...guardProtectedSenders(senders, input.candidates, exclusions),
     ...guardConfidence(senders, input.candidates, exclusions),
   ]);
-  const excludedMessages = guardRecency(input.candidates, exclusions);
+  const excludedMessages = new Set<string>([
+    ...guardRecency(input.candidates, exclusions),
+    ...guardMessageLevel(input.accountId, input.action, input.candidates, exclusions),
+  ]);
 
   const allowed = input.candidates.filter(
     (c) => !blockedSenders.has(c.sender_key) && !excludedMessages.has(c.message_id),

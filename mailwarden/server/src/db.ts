@@ -163,6 +163,16 @@ addColumn("senders", "decided_at", "INTEGER");
 // `unsubscribed_at` is the clock that iteration 45 checks against: if mail from
 // this sender keeps arriving 14 days later, the sender ignored the request and
 // we can say so.
+/**
+ * Attachment presence, per message.
+ *
+ * A message carrying a file is far more likely to be something the user cannot
+ * reproduce — an invoice, a ticket, a contract, a photo. Size is a poor proxy
+ * (image-heavy marketing mail is large and worthless), so this is populated
+ * from Gmail's own `has:attachment` search during sync.
+ */
+addColumn("messages_meta", "has_attachment", "INTEGER NOT NULL DEFAULT 0");
+
 addColumn("senders", "unsubscribed_at", "INTEGER");
 addColumn("senders", "unsubscribe_method", "TEXT");
 addColumn("senders", "unsubscribe_status", "TEXT");

@@ -496,6 +496,12 @@ async function confirmAndRun(plan, replan) {
     ${Object.entries(byCode).map(([, g]) =>
       `<div class="excl"><b>Kept safe:</b> ${fmt.format(g.count)} email(s) from ${g.senders} sender(s) — ${esc(g.reason)}</div>`).join("")}
     ${isDemo ? `<div class="warn-box">Demo inbox: this will stop at the Gmail call, because no mailbox is connected.</div>` : ""}
+    ${plan.action === "trash" ? `<div class="warn-box" style="border-left-color:var(--danger)">
+      <b>Trash is the one action with a deadline.</b> Gmail permanently removes
+      trashed mail after 30 days, and after that nobody can bring it back —
+      not us, not Google. <b>Archive</b> clears your inbox just as well, keeps
+      everything searchable in All Mail, and never expires.
+      </div>` : ""}
     <p class="excl" style="margin-top:14px">
       ${plan.action === "trash"
         ? "Trash stays in Gmail for 30 days and you can restore it there."

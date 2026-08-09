@@ -269,6 +269,48 @@ async function tryIncrementalSync(accountId: string, startHistoryId: string): Pr
   }
 }
 
+/**
+ * Flags every message carrying an attachment, using Gmail's own search.
+ *
+ * Done as a separate id-only listing rather than inferred from message size:
+ * size is a bad proxy, because image-heavy marketing mail is large and
+ * worthless while a 40 KB PDF invoice is small and irreplaceable. Listing ids
+ * is cheap — 500 per page, no per-message fetch — so this costs a handful of
+ * calls against a scan that already makes thousands.
+ *
+ * Failure here is deliberately non-fatal but loud: a scan that succeeded is
+ * more useful than none, and the guard layer treats "unknown" as "no
+ * attachment", so the only cost is losing one protective signal.
+ */
+async function markAttachments(accountId: string, gmail: Gmail): Promise<void> {
+  try {
+    let pageToken: string | undefined;
+    let flagged = 0;
+    const stmt = db.prepare(
+      `UPDATE messages_meta SET has_attachment = 1 WHERE account_id = ? AND message_id = ?`,
+    );
+
+    do {
+      const list = await gmail.users.messages.list({
+        userId: "me",
+        maxResults: 500,
+        pageToken,
+        q: "has:attachment -in:chats -in:draft",
+      });
+      const ids = (list.data.messages ?? []).map((m) => m.id!).filter(Boolean);
+      db.transaction(() => {
+        for (const id of ids) stmt.run(accountId, id);
+      })();
+      flagged += ids.length;
+      pageToken = list.data.nextPageToken ?? undefined;
+    } while (pageToken);
+
+    console.log(`[sync] flagged ${flagged} messages with attachments`);
+  } catch (err) {
+    console.error("[sync] attachment pass failed; attachments will not be protected:", err);
+  }
+}
+
 const senderCount = (accountId: string): number =>
   (db.prepare(`SELECT COUNT(*) c FROM senders WHERE account_id = ?`).get(accountId) as { c: number })
     .c;
@@ -336,6 +378,7 @@ async function fullSync(accountId: string, maxMessages?: number): Promise<void> 
       if (!pageToken) break outer;
     }
 
+    await markAttachments(accountId, gmail);
     aggregateSenders(accountId);
     state.senders = senderCount(accountId);
     state.done = true;
