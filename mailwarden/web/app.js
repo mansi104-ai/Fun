@@ -1,102 +1,127 @@
 /**
  * Mailwarden app client.
  *
- * This lives in its own file rather than inline in app.html for a hard reason,
- * not a stylistic one: the production CSP is `default-src 'self'` with no
- * script-src, which blocks inline scripts outright. Inlined, this code silently
- * did nothing in production — the page rendered, every asset returned 200, and
- * not one API call was ever made.
+ * Organised around one idea: SAFE / REVIEW / PROTECTED. The user's real fear is
+ * not "will it find enough junk" but "will it touch something important", so
+ * protection is a headline number rather than a footnote, and every claim the
+ * interface makes is backed by a value the server actually computed.
  *
- * Do NOT move it back into the HTML, and do NOT "fix" a future CSP violation by
- * adding 'unsafe-inline'. smoke.ts fails the build if an inline <script> with a
- * body reappears in web/.
+ * Two rules this file follows without exception:
+ *   1. No number is invented. If the API does not return it, it is not shown.
+ *   2. No generated prose. Evidence comes from observed facts (`evidence[]`),
+ *      never from a model writing an explanation after the fact.
+ *
+ * Lives in its own file because the production CSP is `default-src 'self'` with
+ * no script-src — an inline script silently never executes. smoke.ts fails the
+ * build if one reappears.
  */
+
 const $ = (id) => document.getElementById(id);
 
 /**
- * The Content-Type header is set ONLY when there is a body to describe.
- *
- * Sending `Content-Type: application/json` with an empty body makes Fastify
- * reject the request outright with FST_ERR_CTP_EMPTY_JSON_BODY — a 400 before
- * the handler ever runs. Every bodyless POST in this app hit that: starting a
- * scan, executing a batch, and undoing one. The scan button simply hung on
- * "Connecting…" because the rejection was never surfaced.
+ * Content-Type is set only when there is a body. Sending it with an empty body
+ * makes Fastify reject the request with FST_ERR_CTP_EMPTY_JSON_BODY, a 400
+ * raised before the handler runs — which once broke every bodyless POST.
  */
 const api = async (url, opts = {}) => {
   const hasBody = opts.body !== undefined && opts.body !== null;
   const res = await fetch(url, {
     ...opts,
-    headers: {
-      ...(hasBody ? { "Content-Type": "application/json" } : {}),
-      ...(opts.headers ?? {}),
-    },
+    headers: { ...(hasBody ? { "Content-Type": "application/json" } : {}), ...(opts.headers ?? {}) },
     body: hasBody ? JSON.stringify(opts.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.message || data.error || res.statusText), { data, status: res.status });
+  if (!res.ok) {
+    throw Object.assign(new Error(data.message || data.error || res.statusText), {
+      data, status: res.status,
+    });
+  }
   return data;
 };
 
 const fmt = new Intl.NumberFormat();
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const mb = (b) => b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : `${Math.round(b / 1048576)} MB`;
-const since = (ts) => ts ? new Date(ts).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "—";
+const mb = (b) => !b ? "0 MB"
+  : b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1048576))} MB`;
+const day = (ts) => ts ? new Date(ts).toLocaleDateString(undefined,
+  { day: "numeric", month: "short" }) : "—";
 
+const SECTIONS = ["scan", "overview", "list", "review", "protectedView", "history", "receipt"];
 const show = (id) => {
-  for (const s of ["scan", "home", "job", "receipt", "review"]) $(s).classList.add("hidden");
+  for (const s of SECTIONS) $(s).classList.add("hidden");
   $(id).classList.remove("hidden");
-  $("tray").classList.add("hidden");
   window.scrollTo({ top: 0, behavior: "instant" });
 };
 
-let senders = [];
-let selection = new Map();
-let showAll = false;
-let lastBatchId = null;
-let currentRecipe = null;
+// ── State ────────────────────────────────────────────────────────────
+let overview = null;
 let isDemo = false;
-let categories = [];
-let currentCat = null;
-/** Sender keys the user unticked in the current category. Narrows only. */
-let excluded = new Set();
-let reviewCat = "";
+let tab = "overview";
+let reviewQueue = [];
+let reviewIndex = 0;
+let lastBatchId = null;
+let readerSender = null;
+
+// ── Navigation ───────────────────────────────────────────────────────
 
 /**
- * The brand lockup is the way home from every screen — job, receipt, sender
- * review, and a finished scan. Screens previously each carried their own back
- * link, so anywhere one was missing was a dead end.
- *
- * Deliberately does nothing mid-scan: navigating away from a running scan looks
- * like it was cancelled, and the scan screen has no state worth abandoning.
+ * Seven items, no more. Counts are only rendered once the data exists, so the
+ * nav never shows a zero that is really "not loaded yet".
  */
+function renderTabs() {
+  if (!overview) return;
+  const items = [
+    ["overview", "Overview", null],
+    ["clean", "Clean", overview.safe.messages],
+    ["review", "Review", overview.review.messages],
+    ["protected", "Protected", overview.protected.messages],
+    ["history", "History", overview.history.cleanups || null],
+    ["unsub", "Unsubscribe", null],
+    ["settings", "Settings", null],
+  ];
+  $("tabs").innerHTML = items.map(([id, label, count]) => `
+    <button data-tab="${id}" ${tab === id ? 'aria-current="page"' : ""}>
+      ${label}${count ? `<span class="count">${fmt.format(count)}</span>` : ""}
+    </button>`).join("");
+  $("tabs").classList.remove("hidden");
+  for (const el of document.querySelectorAll("[data-tab]")) {
+    el.onclick = () => goTab(el.dataset.tab);
+  }
+}
+
+async function goTab(next) {
+  tab = next;
+  renderTabs();
+  if (next === "overview") return renderOverview();
+  if (next === "clean") return renderList("safe");
+  if (next === "review") return renderList("review");
+  if (next === "protected") return renderProtected();
+  if (next === "history") return renderHistory();
+  if (next === "unsub") return renderUnsub();
+  if (next === "settings") return renderSettings();
+}
+
 $("goHome").onclick = async () => {
   const scanning = !$("scan").classList.contains("hidden")
     && !$("scanProgress").classList.contains("hidden");
   if (scanning) return;
-  try {
-    await loadHome();
-  } catch {
-    // No account or no scan yet — the scan screen IS home in that case.
-    show("scan");
-  }
+  try { await loadOverview(); } catch { show("scan"); }
 };
 
-// ── Screen 1: scan ───────────────────────────────────────────────────
+// ── Scan ─────────────────────────────────────────────────────────────
+
 $("startScan").onclick = async () => {
   $("startScan").disabled = true;
   $("scanProgress").classList.remove("hidden");
   $("ticker").textContent = "Starting…";
   try {
     const res = await api("/api/scan", { method: "POST" });
-    // A scan already running is not an error — reattach to it rather than
-    // telling the user nothing happened.
     if (res.alreadyRunning) $("ticker").textContent = "A scan is already running — reattaching…";
     streamProgress();
   } catch (err) {
-    // Never leave the button dead with a spinner. An unreported failure here
-    // is indistinguishable from a hang, which is exactly how the empty-body
-    // 400 stayed invisible.
+    // Never leave a dead button next to a spinner: an unreported failure is
+    // indistinguishable from a hang.
     $("bar").style.width = "0";
     $("ticker").textContent = `Could not start the scan: ${err.message}`;
     $("startScan").disabled = false;
@@ -104,21 +129,23 @@ $("startScan").onclick = async () => {
   }
 };
 
+/**
+ * Named stages rather than "Loading…". The percentage is real — it is messages
+ * scanned against the scan cap — and the incremental pass shows no bar at all,
+ * because a bar that completes before it renders reads as a glitch.
+ */
 function renderProgress(p) {
-  // An incremental pass finishes in seconds and touches a handful of messages,
-  // so a 0–25,000 bar would sit at 0% and read as a hang. Different job,
-  // different indicator.
   if (p.mode === "incremental") {
-    $("bar").style.width = p.done ? "100%" : "60%";
+    $("bar").style.width = p.done ? "100%" : "55%";
     $("ticker").textContent = p.done
       ? `Up to date — ${fmt.format(p.added ?? 0)} new, ${fmt.format(p.updated ?? 0)} changed.`
-      : "Checking what's changed since last time…";
+      : "Checking what changed since last time…";
     return;
   }
   $("bar").style.width = `${p.done ? 100 : Math.min(98, (p.scanned / 25000) * 100)}%`;
   $("ticker").textContent = p.done
-    ? "Grouping senders…"
-    : `${fmt.format(p.scanned)} messages · ${mb(p.bytes)} attributed`;
+    ? "Grouping senders and deciding what is safe…"
+    : `Reading headers — ${fmt.format(p.scanned)} messages, ${mb(p.bytes)} analysed`;
 }
 
 function streamProgress() {
@@ -130,7 +157,7 @@ function streamProgress() {
     if (p.done && p.state !== "running") {
       es.close();
       if (p.error) { $("ticker").textContent = `Scan failed: ${p.error}`; return; }
-      await loadHome();
+      await loadOverview();
     }
   };
   es.onerror = () => { es.close(); pollProgress(); };
@@ -141,393 +168,566 @@ async function pollProgress() {
   renderProgress(p);
   if (p.done && p.state !== "running") {
     if (p.error) { $("ticker").textContent = `Scan failed: ${p.error}`; return; }
-    return loadHome();
+    return loadOverview();
   }
   setTimeout(pollProgress, 1200);
 }
 
-// ── Screen 2: categories + the tool grid ─────────────────────────────
-async function loadHome() {
-  const [cats, { recipes }] = await Promise.all([
-    api("/api/categories"),
-    api("/api/recipes"),
-  ]);
+// ── Overview ─────────────────────────────────────────────────────────
 
-  categories = cats.categories;
-  const inbox = cats.inbox;
+async function loadOverview() {
+  overview = await api("/api/overview");
+  tab = "overview";
+  renderTabs();
+  renderOverview();
+}
 
-  $("stats").innerHTML = `
-    <div class="stat"><div class="n">${fmt.format(inbox.messages)}</div><div class="l">emails scanned</div></div>
-    <div class="stat"><div class="n">${mb(inbox.bytes)}</div><div class="l">storage used</div></div>
-    <div class="stat"><div class="n">${fmt.format(cats.cleanableTotal)}</div><div class="l">safe to clean</div></div>`;
+function renderOverview() {
+  const o = overview;
+  if (!o) return show("scan");
+  show("overview");
 
-  renderCategoryPicker();
-  renderCategoryList();
+  const nothing = o.safe.messages === 0 && o.review.messages === 0;
 
-  $("tiles").innerHTML = recipes.map(tileHtml).join("");
-  for (const el of document.querySelectorAll("[data-recipe]")) {
-    el.onclick = () => openJob(el.dataset.recipe);
+  $("overview").innerHTML = `
+    <div class="verdict">
+      ${nothing ? `
+        <h1 class="verdict-num">Your inbox is already in good shape</h1>
+        <p class="lede">
+          Mailwarden read ${fmt.format(o.scanned.messages)} messages and found nothing
+          it is confident enough to clean. That is a good outcome, not a failure.
+        </p>` : `
+        <h1 class="verdict-num">${fmt.format(o.safe.messages)} emails are safe to clean</h1>
+        <p class="lede">
+          Out of ${fmt.format(o.scanned.messages)} scanned across
+          ${fmt.format(o.scanned.senders)} senders. Nothing moves until you approve it.
+        </p>`}
+
+      <div class="verdict-guard">
+        <span aria-hidden="true">🛡</span>
+        <span><strong>${fmt.format(o.protected.messages)}</strong> emails are protected
+        and will not be touched.</span>
+      </div>
+
+      ${nothing ? "" : `
+      <div class="verdict-cta">
+        <button class="primary big" id="ctaReview">Review ${fmt.format(o.safe.messages)} safe emails</button>
+      </div>
+      <p class="hint">Archived mail stays in All Mail and is reversible for 30 days.</p>`}
+    </div>
+
+    <div class="triptych">
+      ${stateCard("safe", "Safe", o.safe.messages, o.safe.senders, "High confidence")}
+      ${stateCard("review", "Review", o.review.messages, o.review.senders, "Needs your decision")}
+      ${stateCard("protected", "Protected", o.protected.messages, o.protected.senders, "Mailwarden won't touch these")}
+    </div>
+
+    ${o.protected.reasons.length === 0 ? "" : `
+    <h2>Why those emails are protected</h2>
+    <div class="card" style="padding-top:4px; padding-bottom:4px">
+      ${o.protected.reasons.slice(0, 6).map((r) => `
+        <div class="reason-row">
+          <span>${esc(r.label)}</span>
+          <span class="reason-n">${fmt.format(r.messages)}</span>
+        </div>`).join("")}
+    </div>`}
+
+    <p class="hint" style="margin-top:18px">
+      Last scan ${o.scanned.lastScanAt ? day(o.scanned.lastScanAt) : "—"} ·
+      ${mb(o.scanned.bytes)} analysed ·
+      <button class="link-btn" id="rescan">Scan again</button>
+    </p>`;
+
+  if ($("ctaReview")) $("ctaReview").onclick = () => goTab("clean");
+  $("rescan").onclick = () => { show("scan"); $("startScan").disabled = false; $("startScan").click(); };
+  for (const el of document.querySelectorAll("[data-state]")) {
+    el.onclick = () => goTab(el.dataset.state === "protected" ? "protected"
+      : el.dataset.state === "safe" ? "clean" : "review");
   }
-  show("home");
 }
 
-/**
- * The dropdown. Split into two optgroups so the protected categories are
- * visible and explained rather than quietly missing — a user who cannot find
- * "Banking" in the list assumes we failed to scan it.
- */
-function renderCategoryPicker() {
-  const present = categories.filter((c) => c.totalMessages > 0);
-  const open = present.filter((c) => !c.isProtected);
-  const held = present.filter((c) => c.isProtected);
+const stateCard = (state, label, messages, senders, note) => `
+  <button class="state-card" data-state="${state}">
+    <span class="state-tag ${state}">
+      <span aria-hidden="true">${state === "safe" ? "✓" : state === "review" ? "?" : "🔒"}</span>
+      ${label}
+    </span>
+    <div class="state-n">${fmt.format(messages)}</div>
+    <div class="state-note">${esc(note)}${senders ? ` · ${fmt.format(senders)} sender${senders === 1 ? "" : "s"}` : ""}</div>
+  </button>`;
 
-  const opt = (c) => {
-    const tail = c.cleanableMessages > 0
-      ? `${fmt.format(c.cleanableMessages)} to clean`
-      : c.isProtected ? "protected" : "nothing to clean";
-    return `<option value="${c.id}">${c.icon}  ${esc(c.label)} — ${fmt.format(c.totalMessages)} emails · ${tail}</option>`;
-  };
+// ── Clean / Review lists ─────────────────────────────────────────────
 
-  $("catSelect").innerHTML =
-    (open.length ? `<optgroup label="Safe to clean">${open.map(opt).join("")}</optgroup>` : "") +
-    (held.length ? `<optgroup label="Protected — shown for reference">${held.map(opt).join("")}</optgroup>` : "") ||
-    `<option value="">Nothing scanned yet</option>`;
+async function renderList(state) {
+  show("list");
+  $("list").innerHTML = `<p class="hint">Loading senders…</p>`;
 
-  // Default to whichever category has the most to clean: the fastest win.
-  if (!currentCat || !present.some((c) => c.id === currentCat)) {
-    currentCat = (open.slice().sort((a, b) => b.cleanableMessages - a.cleanableMessages)[0]
-      ?? present[0])?.id ?? null;
-  }
-  if (currentCat) $("catSelect").value = currentCat;
-  renderCategoryPanel();
-}
+  const { senders } = await api(`/api/senders/state?state=${state}`);
+  const actionable = senders.filter((s) => s.actionableCount > 0);
 
-$("catSelect").onchange = (e) => {
-  currentCat = e.target.value;
-  excluded.clear();          // a new category starts with everything ticked
-  renderCategoryPanel();
-};
-
-function currentCategory() {
-  return categories.find((c) => c.id === currentCat) ?? null;
-}
-
-/** Sender keys currently ticked, i.e. what a run would actually target. */
-function includedSenders(c) {
-  return c.senders.filter((s) => s.cleanableCount > 0 && !excluded.has(s.senderKey));
-}
-
-function renderCategoryPanel() {
-  const c = currentCategory();
-  if (!c) {
-    $("catPanel").innerHTML = `<p class="sub" style="margin:0">Run a scan to see your categories.</p>`;
+  if (actionable.length === 0) {
+    $("list").innerHTML = emptyState(
+      state === "safe" ? "Nothing is safe to clean right now"
+        : "Nothing is waiting on your decision",
+      state === "safe"
+        ? "Mailwarden only proposes senders it understands well. When it is unsure, it leaves them alone."
+        : "Everything Mailwarden found fell clearly into safe or protected.",
+    );
+    wireEmpty();
     return;
   }
 
-  const picked = includedSenders(c);
-  const count = picked.reduce((s, x) => s + x.cleanableCount, 0);
-  const bytes = picked.reduce((s, x) => s + Math.round(x.totalBytes * (x.cleanableCount / (x.messageCount || 1))), 0);
-  const partial = picked.length !== c.cleanableSenders;
-
-  const heldNote = c.heldMessages > 0
-    ? `<div class="safe-box">
-         <b>${fmt.format(c.heldMessages)}</b> of these are being kept safe automatically:
-         <ul style="margin:7px 0 0; padding-left:19px">
-           ${c.heldReasons.map((r) => `<li>${esc(r)}</li>`).join("")}
-         </ul>
-       </div>` : "";
-
-  const splitNote = c.needsSplit
-    ? `<div class="warn-box">This category is larger than one safe batch. Untick some senders
-       below and run it in a couple of passes.</div>` : "";
-
-  const body = c.isProtected
-    ? `<div class="safe-box" style="margin-top:18px">
-         Mailwarden never bulk-cleans this category — it is where receipts, codes,
-         tickets and bank mail live. To act on one specific sender, open
-         <b>Review sender by sender</b> and release it there.
-       </div>`
-    : count === 0
-      ? `<div class="cat-num">Nothing to clean</div>
-         <div class="cat-sub">${c.totalMessages > 0
-            ? "Everything here is protected, too recent, or unticked below."
-            : "No senders landed in this category."}</div>`
-      : `<div class="cat-num">${fmt.format(count)} emails</div>
-         <div class="cat-sub">
-           from ${picked.length} sender${picked.length === 1 ? "" : "s"} · frees about ${mb(bytes)}
-           ${partial ? ` · <b>${c.cleanableSenders - picked.length} unticked</b>` : ""}
-         </div>
-         <div class="cat-actions">
-           <button class="primary big-btn" id="catArchive">Archive ${fmt.format(count)} emails</button>
-           <button class="big-btn danger" id="catTrash">Move to trash instead</button>
-         </div>
-         <p class="excl" style="margin-top:11px">Reversible for 30 days. Nothing is permanently deleted.</p>`;
-
-  $("catPanel").innerHTML = `
-    <div class="cat-head">
-      <span class="icon">${c.icon}</span>
-      <div>
-        <h2>${esc(c.label)}</h2>
-        <p>${esc(c.blurb)}</p>
-      </div>
+  const total = actionable.reduce((n, s) => n + s.actionableCount, 0);
+  $("list").innerHTML = `
+    <h1>${state === "safe" ? "Safe to clean" : "Needs your decision"}</h1>
+    <p class="lede">
+      ${state === "safe"
+        ? `${fmt.format(total)} emails from ${actionable.length} senders Mailwarden understands well.`
+        : `${fmt.format(total)} emails Mailwarden is not confident enough to propose. You decide.`}
+    </p>
+    <div class="row" style="margin-bottom:18px">
+      <button class="primary" id="startReview">Go through them one at a time</button>
     </div>
-    ${body}
-    ${splitNote}
-    ${heldNote}
-    ${senderPickerHtml(c)}`;
+    ${actionable.map((s) => senderCard(s, state)).join("")}`;
 
-  if ($("catArchive")) $("catArchive").onclick = () => runCategory(c.id, "archive");
-  if ($("catTrash")) $("catTrash").onclick = () => runCategory(c.id, "trash");
-  wireSenderPicker();
+  $("startReview").onclick = () => startReview(actionable, state);
+  wireSenderCards();
 }
 
-/**
- * Per-sender ticks inside a category. Unticking can only ever *narrow* the
- * batch — the server recomputes membership and intersects, so this control
- * cannot be used to pull in a sender the category does not contain.
- */
-function senderPickerHtml(c) {
-  if (c.senders.length === 0) return "";
-  const rows = c.senders.map((s) => {
-    const held = s.cleanableCount === 0;
-    const unreadPct = s.messageCount ? Math.round((s.unreadCount / s.messageCount) * 100) : 0;
-    const detail = held
-      ? esc(s.holdReason ?? "Held back by the safety rules.")
-      : `${fmt.format(s.cleanableCount)} of ${fmt.format(s.messageCount)} · ${mb(s.totalBytes)} · ${unreadPct}% unread`;
-    return `
-      <label class="pick ${held ? "held" : ""}">
-        <input type="checkbox" data-sender="${esc(s.senderKey)}"
-               ${held ? "disabled" : excluded.has(s.senderKey) ? "" : "checked"} />
-        <span class="who"><b>${esc(s.displayName || s.senderKey)}</b><span>${detail}</span></span>
-      </label>`;
-  }).join("");
-
+function senderCard(s, state) {
+  const name = s.displayName || s.senderKey;
+  const unread = s.messageCount ? Math.round((s.unreadCount / s.messageCount) * 100) : 0;
   return `
-    <details class="senders-pick">
-      <summary><span>Choose which senders (${c.senderCount})</span></summary>
-      <div class="pick-tools">
-        <button id="pickAll">Tick all</button>
-        <button id="pickNone">Untick all</button>
+  <article class="sender">
+    <div class="sender-top">
+      <div>
+        <div class="sender-name">${esc(name)}</div>
+        <div class="sender-meta">
+          ${esc(s.category ?? "unsorted")} · ${mb(s.totalBytes)} · ${unread}% unread
+        </div>
       </div>
-      <div class="pick-list">${rows}</div>
-    </details>`;
+      <div class="sender-n">${fmt.format(s.actionableCount)}</div>
+    </div>
+
+    ${s.evidence.length === 0 ? "" : `
+    <ul class="evidence">
+      ${s.evidence.map((e) => `<li><span class="mark" aria-hidden="true">✓</span><span>${esc(e)}</span></li>`).join("")}
+    </ul>`}
+
+    <div class="sender-actions">
+      <button class="primary" data-act="archive" data-key="${esc(s.senderKey)}">
+        Archive ${fmt.format(s.actionableCount)}</button>
+      <button data-act="read" data-key="${esc(s.senderKey)}">Read</button>
+      <button data-act="protect" data-key="${esc(s.senderKey)}">Always protect</button>
+      ${s.hasUnsubscribe ? `<button data-act="unsub" data-key="${esc(s.senderKey)}">Unsubscribe</button>` : ""}
+    </div>
+  </article>`;
 }
 
-function wireSenderPicker() {
-  for (const el of document.querySelectorAll("[data-sender]")) {
-    el.onchange = () => {
-      if (el.checked) excluded.delete(el.dataset.sender);
-      else excluded.add(el.dataset.sender);
-      refreshPanelHeader();
+function wireSenderCards() {
+  for (const el of document.querySelectorAll("[data-act]")) {
+    el.onclick = () => {
+      const { act, key } = el.dataset;
+      if (act === "archive") return runSenders([key], "archive");
+      if (act === "read") return openReader(key);
+      if (act === "protect") return protectSender(el, key);
+      if (act === "unsub") return runUnsubscribe(el, key);
     };
   }
-  const c = currentCategory();
-  if ($("pickAll")) $("pickAll").onclick = () => { excluded.clear(); reopenPanel(); };
-  if ($("pickNone")) $("pickNone").onclick = () => {
-    for (const s of c.senders) if (s.cleanableCount > 0) excluded.add(s.senderKey);
-    reopenPanel();
-  };
 }
 
-/** Keeps the picker expanded across a re-render so the list doesn't collapse. */
-function reopenPanel() {
-  renderCategoryPanel();
-  const d = document.querySelector("details.senders-pick");
-  if (d) d.open = true;
+function emptyState(title, body) {
+  return `<div class="empty">
+    <h2>${esc(title)}</h2>
+    <p class="lede">${esc(body)}</p>
+    <button class="primary" id="emptyBack">Back to overview</button>
+  </div>`;
+}
+const wireEmpty = () => { if ($("emptyBack")) $("emptyBack").onclick = () => goTab("overview"); };
+
+// ── Focused review ───────────────────────────────────────────────────
+
+function startReview(queue, state) {
+  reviewQueue = queue;
+  reviewIndex = 0;
+  renderReview(state);
 }
 
 /**
- * Updates only the headline numbers on a tick, rather than re-rendering — a
- * full re-render would close the picker and lose the user's scroll position.
+ * One sender at a time. The evidence sits above the actions so the decision is
+ * made with the reasons in view, and Archive is visually primary because it is
+ * the reversible one.
  */
-function refreshPanelHeader() {
-  const c = currentCategory();
-  if (!c) return;
-  const picked = includedSenders(c);
-  const count = picked.reduce((s, x) => s + x.cleanableCount, 0);
-  const num = document.querySelector(".cat-num");
-  const sub = document.querySelector(".cat-sub");
-  if (num) num.textContent = count === 0 ? "Nothing selected" : `${fmt.format(count)} emails`;
-  if (sub) {
-    const unticked = c.cleanableSenders - picked.length;
-    sub.innerHTML = `from ${picked.length} sender${picked.length === 1 ? "" : "s"}` +
-      (unticked > 0 ? ` · <b>${unticked} unticked</b>` : "");
+function renderReview(state) {
+  show("review");
+  const s = reviewQueue[reviewIndex];
+
+  if (!s) {
+    $("review").innerHTML = emptyState(
+      "That's everything",
+      "You have been through every sender in this list.",
+    );
+    wireEmpty();
+    return;
   }
-  for (const id of ["catArchive", "catTrash"]) {
-    const b = $(id);
-    if (!b) continue;
-    b.disabled = count === 0;
-    if (id === "catArchive") b.textContent = `Archive ${fmt.format(count)} emails`;
+
+  const name = s.displayName || s.senderKey;
+  const pct = ((reviewIndex) / reviewQueue.length) * 100;
+
+  $("review").innerHTML = `
+    <div class="review-progress">
+      <span>${reviewIndex + 1} of ${reviewQueue.length}</span>
+      <button class="link-btn" id="exitReview">Back to the list</button>
+    </div>
+    <div class="review-bar"><div style="width:${pct}%"></div></div>
+
+    <article class="sender" style="margin-bottom:0">
+      <div class="sender-top">
+        <div>
+          <div class="sender-name" style="font-size:1.15rem">${esc(name)}</div>
+          <div class="sender-meta">${esc(s.category ?? "unsorted")} · ${mb(s.totalBytes)}</div>
+        </div>
+        <div class="sender-n">${fmt.format(s.actionableCount)}</div>
+      </div>
+
+      ${s.evidence.length === 0 ? "" : `
+      <p class="hint" style="margin:14px 0 4px"><strong>Why Mailwarden thinks these are safe</strong></p>
+      <ul class="evidence">
+        ${s.evidence.map((e) => `<li><span class="mark" aria-hidden="true">✓</span><span>${esc(e)}</span></li>`).join("")}
+      </ul>`}
+
+      <div class="sender-actions" style="margin-top:18px">
+        <button class="primary" id="revArchive">Archive all ${fmt.format(s.actionableCount)}</button>
+        <button id="revKeep">Keep</button>
+        <button id="revRead">Read one</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="danger" id="revTrash" style="flex:1">Move all ${fmt.format(s.actionableCount)} to trash</button>
+      </div>
+      <p class="hint" style="margin-top:10px">
+        Archive keeps everything in All Mail and is reversible for 30 days.
+        Trash starts Gmail's 30-day deletion clock.
+      </p>
+    </article>
+
+    <div class="review-nav">
+      <button id="revPrev" ${reviewIndex === 0 ? "disabled" : ""}>← Previous</button>
+      <button id="revNext">Skip →</button>
+    </div>`;
+
+  $("exitReview").onclick = () => goTab(state === "safe" ? "clean" : "review");
+  $("revArchive").onclick = () => runSenders([s.senderKey], "archive", () => advance(state));
+  $("revTrash").onclick = () => runSenders([s.senderKey], "trash", () => advance(state));
+  $("revKeep").onclick = () => protectSender($("revKeep"), s.senderKey, () => advance(state));
+  $("revRead").onclick = () => openReader(s.senderKey);
+  $("revPrev").onclick = () => { reviewIndex = Math.max(0, reviewIndex - 1); renderReview(state); };
+  $("revNext").onclick = () => advance(state);
+}
+
+function advance(state) {
+  reviewIndex++;
+  renderReview(state);
+}
+
+// ── Protected ────────────────────────────────────────────────────────
+
+async function renderProtected() {
+  show("protectedView");
+  const o = overview;
+  $("protectedView").innerHTML = `<p class="hint">Loading protected senders…</p>`;
+
+  const { senders } = await api("/api/senders/state?state=protected");
+
+  $("protectedView").innerHTML = `
+    <h1>${fmt.format(o.protected.messages)} emails protected</h1>
+    <p class="lede">
+      Mailwarden left these alone. When it is not confident, it does not act —
+      missing some clutter is an acceptable cost, touching something you needed is not.
+    </p>
+
+    ${o.protected.reasons.length === 0 ? "" : `
+    <div class="card" style="padding-top:4px; padding-bottom:4px">
+      ${o.protected.reasons.map((r) => `
+        <div class="reason-row">
+          <span>${esc(r.label)}</span>
+          <span class="reason-n">${fmt.format(r.messages)}</span>
+        </div>`).join("")}
+    </div>`}
+
+    <h2>Protected senders</h2>
+    ${senders.length === 0
+      ? `<p class="hint">No senders are protected at the moment.</p>`
+      : senders.slice(0, 60).map((s) => `
+      <article class="sender">
+        <div class="sender-top">
+          <div>
+            <div class="sender-name">${esc(s.displayName || s.senderKey)}</div>
+            <div class="sender-meta">${esc(s.category ?? "unsorted")} · ${mb(s.totalBytes)}</div>
+          </div>
+          <div class="sender-n">${fmt.format(s.messageCount)}</div>
+        </div>
+        <ul class="evidence held">
+          <li><span class="mark" aria-hidden="true">🔒</span>
+              <span>${esc(s.holdReason ?? "Held back by the safety rules.")}</span></li>
+        </ul>
+        <div class="sender-actions">
+          <button data-act="read" data-key="${esc(s.senderKey)}">Read</button>
+          ${s.userProtected === 1
+            ? `<button data-act="unpin" data-key="${esc(s.senderKey)}">Stop protecting</button>`
+            : `<button data-act="release" data-key="${esc(s.senderKey)}">Let me act on this</button>`}
+        </div>
+      </article>`).join("")}
+    ${senders.length > 60 ? `<p class="hint">Showing the 60 largest of ${senders.length}.</p>` : ""}`;
+
+  for (const el of document.querySelectorAll("[data-act]")) {
+    el.onclick = () => {
+      const { act, key } = el.dataset;
+      if (act === "read") return openReader(key);
+      if (act === "unpin") return setProtection(el, key, "auto");
+      if (act === "release") return setProtection(el, key, "release");
+    };
   }
 }
 
-async function runCategory(id, action) {
-  const c = currentCategory();
-  const keys = includedSenders(c).map((s) => s.senderKey);
-  if (keys.length === 0) return;
+// ── History ──────────────────────────────────────────────────────────
 
+async function renderHistory() {
+  show("history");
+  $("history").innerHTML = `<p class="hint">Loading history…</p>`;
+  const { batches } = await api("/api/batches");
+  const done = batches.filter((b) => b.status === "done" || b.status === "undone");
+
+  if (done.length === 0) {
+    $("history").innerHTML = emptyState(
+      "No cleanups yet",
+      "Once you clean something, every run is recorded here with an undo button.",
+    );
+    wireEmpty();
+    return;
+  }
+
+  $("history").innerHTML = `
+    <h1>Cleanup history</h1>
+    <p class="lede">
+      ${fmt.format(overview.history.messagesCleaned)} emails cleaned across
+      ${fmt.format(overview.history.cleanups)} run${overview.history.cleanups === 1 ? "" : "s"}.
+      ${overview.history.undone > 0 ? `${overview.history.undone} undone.` : ""}
+    </p>
+    <div class="card" style="padding-top:4px; padding-bottom:4px">
+      ${done.map((b) => `
+        <div class="hist-row">
+          <div>
+            <div><strong>${fmt.format(b.message_count)}</strong>
+              ${b.action === "trash" ? "trashed" : "archived"}</div>
+            <div class="hint">${day(b.created_at)} · ${mb(b.bytes_freed)}
+              ${b.status === "undone" ? " · undone" : ""}</div>
+          </div>
+          ${b.status === "done"
+            ? `<button data-undo="${esc(b.id)}">Undo</button>`
+            : `<span class="hint">reversed</span>`}
+        </div>`).join("")}
+    </div>`;
+
+  for (const el of document.querySelectorAll("[data-undo]")) {
+    el.onclick = () => undo(el.dataset.undo, el);
+  }
+}
+
+// ── Unsubscribe ──────────────────────────────────────────────────────
+//
+// Deliberately its own section rather than a step inside cleanup. Unsubscribing
+// tells a third party something about you, so it stays a separate, per-sender
+// decision — and Mailwarden's identity is safe cleanup, not list management.
+
+async function renderUnsub() {
+  show("list");
+  $("list").innerHTML = `<p class="hint">Loading senders with unsubscribe links…</p>`;
+
+  const [safe, review] = await Promise.all([
+    api("/api/senders/state?state=safe"),
+    api("/api/senders/state?state=review"),
+  ]);
+  const all = [...safe.senders, ...review.senders]
+    .filter((s) => s.hasUnsubscribe)
+    .sort((a, b) => b.messageCount - a.messageCount);
+
+  if (all.length === 0) {
+    $("list").innerHTML = emptyState(
+      "No senders advertise an unsubscribe link",
+      "Mailwarden only offers this where a sender publishes a real unsubscribe header. Archiving them is the alternative.",
+    );
+    wireEmpty();
+    return;
+  }
+
+  $("list").innerHTML = `
+    <h1>Unsubscribe</h1>
+    <p class="lede">
+      ${all.length} senders publish a real unsubscribe link. One-click requests are
+      sent for you; anything else opens so you can finish it yourself.
+    </p>
+    <div class="note">
+      Mailwarden never sends email on your behalf — it does not ask Google for
+      permission to send. Senders that only accept unsubscribes by email open in
+      your mail client.
+    </div>
+    ${all.map((s) => `
+      <article class="sender">
+        <div class="sender-top">
+          <div>
+            <div class="sender-name">${esc(s.displayName || s.senderKey)}</div>
+            <div class="sender-meta">${esc(s.category ?? "unsorted")} · ${fmt.format(s.messageCount)} emails</div>
+          </div>
+        </div>
+        <div class="sender-actions">
+          <button data-act="unsub" data-key="${esc(s.senderKey)}">Unsubscribe</button>
+          <button data-act="read" data-key="${esc(s.senderKey)}">Read</button>
+        </div>
+      </article>`).join("")}`;
+  wireSenderCards();
+}
+
+// ── Settings ─────────────────────────────────────────────────────────
+
+async function renderSettings() {
+  show("list");
+  const me = await api("/api/me");
+  const { limits } = await api("/api/safety/limits");
+
+  $("list").innerHTML = `
+    <h1>Settings</h1>
+
+    <h2>Account</h2>
+    <div class="card">
+      <p style="margin:0 0 6px"><strong>${esc(me.user.email)}</strong></p>
+      <p class="hint" style="margin:0">Plan: ${esc(me.user.plan)} · <a href="/pricing.html">See plans</a></p>
+    </div>
+
+    <h2>What Mailwarden will never touch</h2>
+    <div class="card">
+      <ul class="evidence">
+        <li><span class="mark" aria-hidden="true">🔒</span><span>Anything you starred</span></li>
+        <li><span class="mark" aria-hidden="true">🔒</span><span>Conversations you replied to</span></li>
+        <li><span class="mark" aria-hidden="true">🔒</span><span>Receipts, order confirmations and invoices</span></li>
+        <li><span class="mark" aria-hidden="true">🔒</span><span>Login codes, password resets and 2FA</span></li>
+        <li><span class="mark" aria-hidden="true">🔒</span><span>Bank, payment and tax mail</span></li>
+        <li><span class="mark" aria-hidden="true">🔒</span><span>Flights, hotels and bookings</span></li>
+        <li><span class="mark" aria-hidden="true">🔒</span><span>Mail from the last ${limits.recencyProtectionDays} days</span></li>
+        <li><span class="mark" aria-hidden="true">🔒</span><span>Anything it does not understand well enough</span></li>
+      </ul>
+      <p class="hint" style="margin:12px 0 0">
+        Attachments and Gmail-important mail are never <em>trashed</em>; they can still be archived,
+        which is reversible.
+      </p>
+    </div>
+
+    <h2>Protected senders</h2>
+    <div class="card">
+      <p class="hint" style="margin:0">
+        Pin any sender from the Clean or Protected list to protect it permanently.
+        Domain-level rules (for example <code>@bank.com</code>) are not implemented yet.
+      </p>
+    </div>
+
+    <h2>Privacy</h2>
+    <div class="card">
+      <ul class="evidence">
+        <li><span class="mark" aria-hidden="true">✓</span><span>Mailwarden cannot permanently delete anything — Google does not grant it that ability</span></li>
+        <li><span class="mark" aria-hidden="true">✓</span><span>Sorting uses headers only: sender, date, size, and Gmail's own labels</span></li>
+        <li><span class="mark" aria-hidden="true">✓</span><span>Subjects are stored as a salted hash, never as text</span></li>
+        <li><span class="mark" aria-hidden="true">✓</span><span>A message is fetched only when you open it, and is never saved</span></li>
+        <li><span class="mark" aria-hidden="true">✓</span><span>No message content is ever sent to a model</span></li>
+      </ul>
+      <p class="hint" style="margin:12px 0 0">
+        <a href="/api/audit">Your full audit log</a> records every action taken on your account.
+      </p>
+    </div>`;
+}
+
+// ── Actions ──────────────────────────────────────────────────────────
+
+async function runSenders(senderKeys, action, after) {
   const planOnce = async (confirmed) => {
     try {
-      return await api(`/api/categories/${id}/plan`, {
-        method: "POST", body: { action, senderKeys: keys, confirmed },
+      return await api("/api/batches/plan", {
+        method: "POST", body: { action, senderKeys, confirmed },
       });
     } catch (err) {
-      if (err.status === 409) return err.data;   // guard verdict, not a failure
+      if (err.status === 409) return err.data;   // a guard verdict, not a failure
       throw err;
     }
   };
-
   try {
-    await confirmAndRun(await planOnce(false), () => planOnce(true));
+    await confirmAndRun(await planOnce(false), () => planOnce(true), after);
   } catch (err) {
     if (err.status === 402) return upgradePrompt(err.data.message);
-    alert(`Something went wrong: ${err.message}`);
-  }
-}
-
-/** The browsable list. Every category appears, protected ones included. */
-function renderCategoryList() {
-  const present = categories.filter((c) => c.totalMessages > 0);
-  $("catList").innerHTML = present.map((c) => `
-    <button class="cat-row ${c.isProtected ? "locked" : ""}" data-cat="${c.id}">
-      <span class="ic">${c.icon}</span>
-      <span class="lb">${esc(c.label)}<small>${fmt.format(c.totalMessages)} emails · ${c.senderCount} sender${c.senderCount === 1 ? "" : "s"} · ${mb(c.totalBytes)}</small></span>
-      <span class="rt">${c.isProtected
-        ? `<b>Protected</b><small>kept safe</small>`
-        : c.cleanableMessages > 0
-          ? `<b>${fmt.format(c.cleanableMessages)}</b><small>can be cleaned</small>`
-          : `<b style="color:var(--muted);font-weight:500">—</b><small>nothing to clean</small>`}</span>
-    </button>`).join("");
-
-  for (const el of document.querySelectorAll("[data-cat]")) {
-    el.onclick = () => {
-      currentCat = el.dataset.cat;
-      excluded.clear();
-      $("catSelect").value = currentCat;
-      renderCategoryPanel();
-      $("catPanel").scrollIntoView({ behavior: "smooth", block: "center" });
-    };
-  }
-}
-
-function tileHtml(r) {
-  const empty = r.messageCount === 0;
-  return `
-  <button class="tile ${empty ? "empty" : ""}" data-recipe="${r.id}" ${empty ? "disabled" : ""}>
-    <div class="icon">${r.icon}</div>
-    <div class="title">${esc(r.title)}</div>
-    <div class="blurb">${esc(r.blurb)}</div>
-    <div class="count">${empty ? "Nothing found" : fmt.format(r.messageCount) + " emails"}</div>
-    ${empty ? "" : `<div class="meta">${mb(r.bytes)} · ${r.senderCount} sender${r.senderCount === 1 ? "" : "s"}</div>`}
-  </button>`;
-}
-
-// ── Screen 3: one job, one button ────────────────────────────────────
-async function openJob(recipeId) {
-  const { recipes } = await api("/api/recipes");
-  const r = recipes.find((x) => x.id === recipeId);
-  if (!r) return;
-  currentRecipe = r;
-
-  $("jobIcon").textContent = r.icon;
-  $("jobCount").textContent = `${fmt.format(r.messageCount)} emails`;
-  $("jobSub").textContent = `${r.blurb} Frees about ${mb(r.bytes)}.`;
-  $("jobSenders").innerHTML =
-    r.sampleSenders.map((s) => `<div class="sender-line"><span>${esc(s)}</span></div>`).join("") +
-    (r.senderCount > r.sampleSenders.length
-      ? `<div class="sender-line"><span class="excl">and ${r.senderCount - r.sampleSenders.length} more sender(s)</span></div>`
-      : "");
-  $("jobNotes").innerHTML = `
-    <div class="safe-box">
-      Receipts, boarding passes, login codes, bank mail, and anyone you've replied
-      to are protected and excluded automatically — even if they look like
-      marketing. Mail from the last 7 days is left alone too.
-    </div>`;
-  $("jobRun").textContent = `Archive ${fmt.format(r.messageCount)} emails`;
-  $("jobRun").disabled = false;
-  show("job");
-}
-
-$("jobBack").onclick = () => loadHome();
-
-$("jobRun").onclick = async () => {
-  if (!currentRecipe) return;
-  $("jobRun").disabled = true;
-  try {
-    const plan = await planRecipe(currentRecipe.id, false);
-    await confirmAndRun(plan, () => planRecipe(currentRecipe.id, true));
-  } catch (err) {
-    alert(err.status === 402 ? err.data.message : `Something went wrong: ${err.message}`);
-  } finally {
-    $("jobRun").disabled = false;
-  }
-};
-
-async function planRecipe(id, confirmed) {
-  try {
-    return await api(`/api/recipes/${id}/plan`, { method: "POST", body: { confirmed } });
-  } catch (err) {
-    if (err.status === 409) return err.data;   // guard verdict, not a failure
-    throw err;
+    alert(`Could not continue: ${err.message}`);
   }
 }
 
 /**
- * The consent gate. The server has already applied the guardrails; this screen
- * reports the server's own verdict rather than recomputing anything locally.
+ * The consent gate. It reports the server's verdict rather than recomputing
+ * anything, so what the user approves is exactly what will run.
  */
-async function confirmAndRun(plan, replan) {
-  const exclusions = plan.exclusions ?? [];
+async function confirmAndRun(plan, replan, after) {
   const violations = plan.violations ?? [];
   const blocking = violations.filter((v) => v.severity === "block");
 
   const byCode = {};
-  for (const e of exclusions) {
-    byCode[e.code] ??= { count: 0, senders: 0, reason: e.reason };
+  for (const e of plan.exclusions ?? []) {
+    byCode[e.code] ??= { count: 0, reason: e.reason };
     byCode[e.code].count += e.messageCount;
-    byCode[e.code].senders += 1;
   }
 
   $("confirmBody").innerHTML = `
-    <div style="font-size:1.05rem; margin-bottom:6px">
-      <strong>${fmt.format(plan.messageCount)}</strong> emails will be ${plan.action === "trash" ? "moved to trash" : "archived"}.
-    </div>
-    ${violations.filter((v) => v.severity === "confirm").map((v) => `<div class="warn-box">${esc(v.message)}</div>`).join("")}
-    ${blocking.map((v) => `<div class="warn-box" style="border-left-color:var(--danger)">${esc(v.message)}</div>`).join("")}
-    ${Object.entries(byCode).map(([, g]) =>
-      `<div class="excl"><b>Kept safe:</b> ${fmt.format(g.count)} email(s) from ${g.senders} sender(s) — ${esc(g.reason)}</div>`).join("")}
-    ${isDemo ? `<div class="warn-box">Demo inbox: this will stop at the Gmail call, because no mailbox is connected.</div>` : ""}
-    ${plan.action === "trash" ? `<div class="warn-box" style="border-left-color:var(--danger)">
-      <b>Trash is the one action with a deadline.</b> Gmail permanently removes
-      trashed mail after 30 days, and after that nobody can bring it back —
-      not us, not Google. <b>Archive</b> clears your inbox just as well, keeps
-      everything searchable in All Mail, and never expires.
-      </div>` : ""}
-    <p class="excl" style="margin-top:14px">
-      ${plan.action === "trash"
-        ? "Trash stays in Gmail for 30 days and you can restore it there."
-        : "Archived mail stays in All Mail and remains fully searchable."}
-      You'll get an Undo button next.</p>`;
+    <p style="font-size:1.02rem; margin-bottom:10px">
+      <strong>${fmt.format(plan.messageCount)}</strong> emails will be
+      ${plan.action === "trash" ? "moved to trash" : "archived"}.
+    </p>
+    ${violations.filter((v) => v.severity === "confirm")
+      .map((v) => `<div class="note warn">${esc(v.message)}</div>`).join("")}
+    ${blocking.map((v) => `<div class="note danger">${esc(v.message)}</div>`).join("")}
+
+    ${Object.keys(byCode).length === 0 ? "" : `
+    <div class="note safe">
+      <strong>Kept safe automatically</strong>
+      <ul>${Object.values(byCode).map((g) =>
+        `<li>${fmt.format(g.count)} — ${esc(g.reason)}</li>`).join("")}</ul>
+    </div>`}
+
+    ${plan.action === "trash" ? `<div class="note danger">
+      <strong>Trash is the one action with a deadline.</strong> Gmail permanently
+      removes trashed mail after 30 days and then nobody can recover it.
+      Archive clears your inbox just as well and never expires.
+    </div>` : ""}
+
+    ${isDemo ? `<div class="note warn">Demo inbox: this stops before the Gmail call.</div>` : ""}
+    <p class="hint">${plan.action === "trash"
+      ? "You can restore it from Gmail's Trash, or undo the whole run below."
+      : "Archived mail stays in All Mail and stays searchable."} You get an Undo button next.</p>`;
 
   const runnable = blocking.length === 0 && plan.messageCount > 0;
   $("reallyConfirm").disabled = !runnable;
-  $("reallyConfirm").textContent = runnable ? `Yes, ${plan.action} them` : "Blocked";
+  $("reallyConfirm").textContent = runnable
+    ? (plan.action === "trash" ? "Move to trash" : "Archive them") : "Blocked";
   $("confirmDialog").showModal();
 
   $("reallyConfirm").onclick = async () => {
     $("reallyConfirm").disabled = true;
     try {
-      // Re-plan with confirmed:true so the server re-runs its own guards.
       const finalPlan = await replan();
       if (!finalPlan.batchId) throw new Error(finalPlan.violations?.[0]?.message ?? "Blocked.");
       const done = await api(`/api/batches/${finalPlan.batchId}/execute`, { method: "POST" });
       lastBatchId = finalPlan.batchId;
       $("confirmDialog").close();
-      showReceipt(done.messageCount, done.bytesFreed, done.action);
+      overview = await api("/api/overview");
+      renderTabs();
+      if (after) after();
+      else showReceipt(done);
     } catch (err) {
       $("confirmDialog").close();
       if (err.status === 402) upgradePrompt(err.data.message);
-      else if (err.status === 409) alert(`Blocked by the safety policy: ${err.data.message}`);
+      else if (err.status === 409) alert(`Stopped by the safety policy: ${err.data.message}`);
       else alert(`Could not complete: ${err.message}`);
     } finally {
       $("reallyConfirm").disabled = false;
@@ -537,214 +737,94 @@ async function confirmAndRun(plan, replan) {
 
 $("cancelConfirm").onclick = () => $("confirmDialog").close();
 
-// ── Screen 4: receipt ────────────────────────────────────────────────
-function showReceipt(messages, bytes, action) {
-  $("receiptCount").textContent = `${fmt.format(messages)} emails ${action === "trash" ? "trashed" : "archived"}`;
-  $("receiptDetail").textContent = `${mb(bytes)} of Gmail storage reclaimed.`;
-  $("receiptNote").textContent = action === "trash"
-    ? "Trashed mail stays in Gmail for 30 days — restore it there, or undo the whole batch below."
-    : "Archived mail is still in All Mail and fully searchable. Nothing was deleted.";
-  $("undoBtn").disabled = false;
-  $("undoBtn").textContent = "Undo everything";
-  selection.clear();
+function showReceipt(done) {
   show("receipt");
-}
-
-$("undoBtn").onclick = async () => {
-  if (!lastBatchId) return;
-  $("undoBtn").disabled = true;
-  const { restored, failed } = await api(`/api/batches/${lastBatchId}/undo`, { method: "POST" });
-  $("receiptNote").textContent = failed
-    ? `Restored ${fmt.format(restored)} emails. ${fmt.format(failed)} could not be restored — they are still in Gmail under All Mail or Trash.`
-    : `Restored ${fmt.format(restored)} emails to where they were.`;
-  $("undoBtn").textContent = failed ? "Retry undo" : "Undone";
-  $("undoBtn").disabled = !failed;
-};
-
-$("doneBtn").onclick = () => loadHome();
-
-// ── Advanced: sender by sender ───────────────────────────────────────
-$("toAdvanced").onclick = () => loadSenders();
-$("advBack").onclick = () => loadHome();
-
-async function loadSenders() {
-  senders = (await api("/api/senders")).senders;
-  // Deep-linking straight here skips loadHome, so make sure we have the labels.
-  if (categories.length === 0) categories = (await api("/api/categories")).categories;
-  const total = senders.reduce((s, x) => s + x.messageCount, 0);
-  $("reviewTitle").textContent = `${fmt.format(senders.length)} senders`;
-  $("reviewSub").textContent = `${fmt.format(total)} emails. Decide once per sender — everything is reversible for 30 days.`;
-
-  // Same category vocabulary as the home screen, so the two views agree.
-  const counts = new Map();
-  for (const s of senders) {
-    const k = s.category ?? "unknown";
-    counts.set(k, (counts.get(k) ?? 0) + 1);
-  }
-  $("revCat").innerHTML =
-    `<option value="">All categories (${senders.length} senders)</option>` +
-    categories
-      .filter((c) => counts.has(c.id))
-      .map((c) => `<option value="${c.id}">${c.icon}  ${esc(c.label)} — ${counts.get(c.id)} senders</option>`)
-      .join("");
-  $("revCat").value = reviewCat;
-
-  show("review");
-  renderSenders();
-  renderTray();
-}
-
-$("revCat").onchange = (e) => { reviewCat = e.target.value; renderSenders(); };
-
-function renderSenders() {
-  let list = showAll ? senders : senders.filter((s) => s.suggested || s.protected);
-  if (reviewCat) list = list.filter((s) => (s.category ?? "unknown") === reviewCat);
-  $("senders").innerHTML = list.map(cardHtml).join("");
-
-  for (const el of document.querySelectorAll("[data-act]")) {
-    el.onclick = () => {
-      const { key, act } = el.dataset;
-      if (act === "keep") selection.delete(key); else selection.set(key, act);
-      renderSenders(); renderTray();
-    };
-  }
-  for (const el of document.querySelectorAll("[data-read]")) {
-    el.onclick = () => openReader(el.dataset.key);
-  }
-  for (const el of document.querySelectorAll("[data-unsub]")) {
-    el.onclick = () => runUnsubscribe(el, el.dataset.key);
-  }
-  for (const el of document.querySelectorAll("[data-pin]")) {
-    el.onclick = async () => {
-      const { key, pin } = el.dataset;
-      el.disabled = true;
-      await api("/api/senders/protection", { method: "POST", body: { senderKey: key, state: pin } });
-      if (pin === "pin") selection.delete(key);
-      senders = (await api("/api/senders")).senders;
-      renderSenders(); renderTray();
-    };
-  }
-}
-
-function cardHtml(s) {
-  const chosen = selection.get(s.senderKey);
-  const unreadPct = s.messageCount ? Math.round((s.unreadCount / s.messageCount) * 100) : 0;
-  const pin = s.userProtected === 1
-    ? `<button data-key="${s.senderKey}" data-pin="auto">Unpin</button>`
-    : `<button data-key="${s.senderKey}" data-pin="pin">Pin as protected</button>`;
-  const release = s.protected && s.userProtected !== 1 && s.category !== "personal"
-    ? `<button data-key="${s.senderKey}" data-pin="release">Let me act on this</button>` : "";
-
-  // Reading is always offered, including for protected senders: seeing what a
-  // sender actually sends is how you judge whether the lock is right.
-  const read = `<button data-key="${esc(s.senderKey)}" data-read="1">Read mail</button>`;
-  // Offered only when the sender advertises List-Unsubscribe. A button that
-  // usually fails teaches people to ignore it.
-  const unsub = !s.hasUnsubscribe ? ""
-    : s.unsubscribeStatus === "sent"
-      ? `<span class="tag done">unsubscribed</span>`
-      : `<button data-key="${esc(s.senderKey)}" data-unsub="1">Unsubscribe</button>`;
-
-  const controls = s.protected
-    ? `<span class="lock-note">Locked — nothing here will be touched in bulk.</span>
-       <div class="actions" style="margin-top:8px">${read}${unsub}${release}${pin}</div>`
-    : `<div class="actions">
-         ${read}
-         ${unsub}
-         <button data-key="${s.senderKey}" data-act="keep">Keep</button>
-         <button data-key="${s.senderKey}" data-act="archive">Archive all ${fmt.format(s.messageCount)}</button>
-         <button data-key="${s.senderKey}" data-act="trash" class="danger">Trash all ${fmt.format(s.messageCount)}</button>
-         ${pin}
-       </div>`;
-
-  return `
-  <div class="card ${chosen ? "selected" : ""} ${s.protected ? "locked" : ""}">
-    <div class="card-top">
-      <span class="name">${esc(s.displayName || s.senderKey)}</span>
-      <span class="tags">
-        <span class="tag ${s.protected ? "protected" : ""}">${esc(s.category ?? "unknown")}</span>
-        ${s.protected ? '<span class="tag protected">protected</span>' : ""}
-        ${chosen ? `<span class="tag">${chosen}</span>` : ""}
-      </span>
+  $("receipt").innerHTML = `
+    <h1>Cleanup complete</h1>
+    <p class="lede">
+      ${fmt.format(done.messageCount)} emails
+      ${done.action === "trash" ? "moved to trash" : "archived"} ·
+      ${mb(done.bytesFreed)} freed.
+    </p>
+    <div class="note safe">
+      <strong>0 protected emails were touched.</strong>
+      ${done.action === "trash"
+        ? "Trashed mail stays in Gmail for 30 days — restore it there, or undo the whole run."
+        : "Archived mail is still in All Mail and fully searchable. Nothing was deleted."}
     </div>
-    <div class="stats-line">${fmt.format(s.messageCount)} emails · ${mb(s.totalBytes)} · ${unreadPct}% unread · since ${since(s.firstSeen)}</div>
-    <div class="reason">${esc(s.reason ?? "")}</div>
-    ${controls}
-  </div>`;
+    <div class="row" style="margin-top:18px">
+      <button class="primary big" id="rcDone">Back to overview</button>
+      <button class="big" id="rcUndo">Undo this cleanup</button>
+    </div>
+    <p class="hint" id="rcNote" style="margin-top:12px"></p>`;
+
+  $("rcDone").onclick = () => goTab("overview");
+  $("rcUndo").onclick = () => undo(lastBatchId, $("rcUndo"));
 }
-
-$("filterSuggested").onclick = () => { showAll = false; renderSenders(); };
-$("filterAll").onclick = () => { showAll = true; renderSenders(); };
-$("selectSuggested").onclick = () => {
-  // Respects the category filter — "select all suggested" while looking at one
-  // category must not silently reach into the others.
-  for (const s of senders) {
-    if (reviewCat && (s.category ?? "unknown") !== reviewCat) continue;
-    if (s.suggested && !s.protected) selection.set(s.senderKey, "archive");
-  }
-  renderSenders(); renderTray();
-};
-$("clearSel").onclick = () => { selection.clear(); renderSenders(); renderTray(); };
-
-function renderTray() {
-  if (selection.size === 0 || $("review").classList.contains("hidden")) {
-    return $("tray").classList.add("hidden");
-  }
-  const chosen = senders.filter((s) => selection.has(s.senderKey));
-  const messages = chosen.reduce((sum, s) => sum + s.messageCount, 0);
-  const archiving = chosen.filter((s) => selection.get(s.senderKey) === "archive").length;
-  $("trayText").innerHTML =
-    `<strong>${fmt.format(messages)} emails</strong> from ${chosen.length} senders` +
-    `<br><span style="color:var(--muted); font-size:.85rem">${archiving} to archive, ${chosen.length - archiving} to trash · nothing permanently deleted</span>`;
-  $("tray").classList.remove("hidden");
-}
-
-$("confirmBtn").onclick = async () => {
-  const groups = { archive: [], trash: [] };
-  for (const [key, act] of selection) groups[act].push(key);
-  const action = groups.trash.length > 0 && groups.archive.length === 0 ? "trash" : "archive";
-  const keys = groups[action];
-  if (keys.length === 0) return;
-
-  const planOnce = async (confirmed) => {
-    try {
-      return await api("/api/batches/plan", { method: "POST", body: { action, senderKeys: keys, confirmed } });
-    } catch (err) {
-      if (err.status === 409) return err.data;
-      throw err;
-    }
-  };
-
-  try {
-    await confirmAndRun(await planOnce(false), () => planOnce(true));
-  } catch (err) {
-    alert(err.status === 402 ? err.data.message : `Something went wrong: ${err.message}`);
-  }
-};
 
 /**
- * Unsubscribe is per-sender and never bulk: it tells a third party something
- * about the user, so it stays one deliberate click.
+ * Undo reports what the server VERIFIED, not what it attempted. The server
+ * reads Gmail back after restoring, so `restored` means confirmed-in-place.
  */
+async function undo(batchId, button) {
+  if (!batchId) return;
+  button.disabled = true;
+  button.textContent = "Undoing…";
+  try {
+    const r = await api(`/api/batches/${batchId}/undo`, { method: "POST" });
+    const note = $("rcNote");
+    const parts = [`Restored ${fmt.format(r.restored)} emails.`];
+    if (r.mismatched) parts.push(`${fmt.format(r.mismatched)} did not match and were left alone.`);
+    if (r.missing) parts.push(`${fmt.format(r.missing)} are no longer in Gmail.`);
+    if (!r.verified) parts.push("We could not verify the result against Gmail.");
+    const msg = parts.join(" ");
+    if (note) note.textContent = msg; else alert(msg);
+    button.textContent = "Undone";
+    overview = await api("/api/overview");
+    renderTabs();
+  } catch (err) {
+    button.disabled = false;
+    button.textContent = "Undo";
+    alert(`Could not undo: ${err.message}`);
+  }
+}
+
+async function protectSender(button, senderKey, after) {
+  button.disabled = true;
+  try {
+    await api("/api/senders/protection", { method: "POST", body: { senderKey, state: "pin" } });
+    overview = await api("/api/overview");
+    renderTabs();
+    if (after) after(); else { button.textContent = "Protected"; }
+  } catch (err) {
+    button.disabled = false;
+    alert(`Could not protect: ${err.message}`);
+  }
+}
+
+async function setProtection(button, senderKey, state) {
+  button.disabled = true;
+  try {
+    await api("/api/senders/protection", { method: "POST", body: { senderKey, state } });
+    overview = await api("/api/overview");
+    renderTabs();
+    await renderProtected();
+  } catch (err) {
+    button.disabled = false;
+    alert(`Could not change protection: ${err.message}`);
+  }
+}
+
+/** Unsubscribe is per-sender and never bulk — it tells a third party about you. */
 async function runUnsubscribe(button, senderKey) {
   button.disabled = true;
   button.textContent = "Unsubscribing…";
   try {
     const r = await api(`/api/senders/${encodeURIComponent(senderKey)}/unsubscribe`, { method: "POST" });
-    if (r.status === "sent") {
-      button.replaceWith(Object.assign(document.createElement("span"),
-        { className: "tag done", textContent: "unsubscribed" }));
-    } else if (r.url) {
-      // We hand the link over rather than following it — see unsubscribe.ts.
-      window.open(r.url, "_blank", "noopener,noreferrer");
-      button.disabled = false;
-      button.textContent = "Open unsubscribe page";
-    } else {
-      button.disabled = false;
-      button.textContent = "Unsubscribe";
-    }
+    if (r.url) window.open(r.url, "_blank", "noopener,noreferrer");
+    button.textContent = r.status === "sent" ? "Unsubscribed" : "Open unsubscribe";
+    button.disabled = r.status === "sent";
     alert(r.message);
-    senders = (await api("/api/senders")).senders;
   } catch (err) {
     button.disabled = false;
     button.textContent = "Unsubscribe";
@@ -752,89 +832,72 @@ async function runUnsubscribe(button, senderKey) {
   }
 }
 
-// ── Reading mail ─────────────────────────────────────────────────────
-//
-// Content is fetched live and never stored — not by the server, and not here
-// beyond the open dialog. Closing the reader discards it.
+function upgradePrompt(message) {
+  if (confirm(`${message}\n\nOpen the plans page?`)) window.location.href = "/pricing.html";
+}
 
-let readerSender = null;
+// ── Reading mail ─────────────────────────────────────────────────────
+// Content is fetched live and never stored — not by the server, and not here
+// beyond the open dialog.
 
 async function openReader(senderKey) {
   readerSender = senderKey;
   $("readerTitle").textContent = senderKey;
-  $("readerBody").innerHTML = `<p class="excl">Loading…</p>`;
+  $("readerBody").innerHTML = `<p class="hint">Loading…</p>`;
   $("readerDialog").showModal();
   try {
     const { messages } = await api(`/api/senders/${encodeURIComponent(senderKey)}/messages?limit=20`);
     if (messages.length === 0) {
-      $("readerBody").innerHTML = `<p class="excl">No messages found for this sender.</p>`;
+      $("readerBody").innerHTML = `<p class="hint">No messages found for this sender.</p>`;
       return;
     }
-    renderMessageList(messages);
+    $("readerBody").innerHTML = `
+      <p class="hint" style="margin-top:0">Fetched from Gmail just now. Nothing here is saved.</p>
+      ${messages.map((m) => `
+        <button class="msg" data-msg="${esc(m.messageId)}">
+          <span class="msg-sub">${m.unread ? "● " : ""}${esc(m.subject)}</span>
+          <span class="msg-meta">${new Date(m.date).toLocaleDateString()} · ${mb(m.sizeBytes)}</span>
+          <span class="msg-snip">${esc(m.snippet.slice(0, 130))}</span>
+        </button>`).join("")}`;
+    for (const el of document.querySelectorAll("[data-msg]")) {
+      el.onclick = () => openMessage(el.dataset.msg);
+    }
   } catch (err) {
-    $("readerBody").innerHTML = `<p class="excl">Could not load: ${esc(err.message)}</p>`;
-  }
-}
-
-function renderMessageList(messages) {
-  $("readerBody").innerHTML = `
-    <p class="excl" style="margin-top:0">
-      Fetched from Gmail just now. Nothing here is saved to Mailwarden.
-    </p>
-    <div class="msg-list">${messages.map((m) => `
-      <button class="msg" data-msg="${esc(m.messageId)}">
-        <span class="msg-sub">${m.unread ? "<b>●</b> " : ""}${esc(m.subject)}</span>
-        <span class="msg-meta">${new Date(m.date).toLocaleDateString()} · ${mb(m.sizeBytes)}</span>
-        <span class="msg-snip">${esc(m.snippet.slice(0, 140))}</span>
-      </button>`).join("")}</div>`;
-
-  for (const el of document.querySelectorAll("[data-msg]")) {
-    el.onclick = () => openMessage(el.dataset.msg);
+    $("readerBody").innerHTML = `<p class="hint">Could not load: ${esc(err.message)}</p>`;
   }
 }
 
 async function openMessage(id) {
-  $("readerBody").innerHTML = `<p class="excl">Loading message…</p>`;
+  $("readerBody").innerHTML = `<p class="hint">Loading message…</p>`;
   try {
     const m = await api(`/api/messages/${encodeURIComponent(id)}`);
     $("readerBody").innerHTML = `
       <button class="link-btn" id="backToList">← All messages from this sender</button>
-      <h3 style="margin:12px 0 4px; font-size:1.05rem">${esc(m.subject)}</h3>
-      <div class="excl" style="margin-bottom:12px">
+      <h3 style="margin:12px 0 4px">${esc(m.subject)}</h3>
+      <p class="hint" style="margin-bottom:12px">
         ${esc(m.from)} · ${new Date(m.date).toLocaleString()}
         ${m.convertedFromHtml ? " · shown as plain text" : ""}
-      </div>
+      </p>
       <pre class="msg-body">${esc(m.text)}</pre>`;
     $("backToList").onclick = () => openReader(readerSender);
   } catch (err) {
-    $("readerBody").innerHTML = `<p class="excl">Could not open: ${esc(err.message)}</p>`;
+    $("readerBody").innerHTML = `<p class="hint">Could not open: ${esc(err.message)}</p>`;
   }
 }
 
 $("closeReader").onclick = () => $("readerDialog").close();
 
-/**
- * A paywall that only says "no" wastes the moment the user is most willing to
- * pay. Send them somewhere they can actually buy.
- */
-function upgradePrompt(message) {
-  if (confirm(`${message}
-
-Open the Founding 100 page?`)) {
-    window.location.href = "/pricing.html";
-  }
-}
-
 // ── Boot ─────────────────────────────────────────────────────────────
+
 (async () => {
   try {
     const me = await api("/api/me");
     isDemo = me.demo === true;
     if (isDemo) $("demoBanner").classList.remove("hidden");
     $("plan").textContent = `${me.user.email} · ${me.user.plan}`;
-    if (me.account?.last_sync_at) await loadHome();
+    if (me.account?.last_sync_at) await loadOverview();
     else show("scan");
   } catch {
-    location.href = "/";
+    window.location.href = "/";
   }
 })();

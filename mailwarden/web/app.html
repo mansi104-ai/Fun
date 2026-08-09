@@ -8,396 +8,236 @@
 <meta name="theme-color" content="#0a0a0a" />
 <link rel="stylesheet" href="/brand.css" />
 <style>
-  .wrap { max-width:820px; margin:0 auto; padding:20px clamp(14px,4vw,20px) 150px; }
-  header {
-    display:flex; align-items:center; justify-content:space-between;
-    margin-bottom:32px; gap:12px; flex-wrap:wrap;
-  }
-  /* The mark sits in a solid tile, as in the source artwork. A tile reads as a
-     product logo at small sizes where a thin open outline reads as a stray
-     icon — and it holds its own against the page instead of dissolving into it. */
-  .logo {
-    display:flex; align-items:center; gap:11px; background:none; border:none;
-    padding:4px; margin:-4px; border-radius:12px; color:var(--text); cursor:pointer;
-  }
-  .logo:hover { background:var(--raised); }
-  .logo-tile {
-    display:grid; place-items:center; width:34px; height:34px; border-radius:9px;
-    background:var(--brand-tile); color:var(--brand-ink); flex-shrink:0;
-  }
-  .logo-tile svg { width:26px; height:26px; display:block; }
-  .logo-word {
-    font-weight:640; letter-spacing:-0.015em; font-size:1.06rem; line-height:1;
-  }
-  .plan { font-size:.82rem; color:var(--muted); }
-  .sub { color:var(--muted); margin:0 0 28px; font-size:1.02rem; }
+  /*
+   * App shell. Shared tokens and controls live in brand.css; this file styles
+   * the three things unique to the app: the state model, the review flow, and
+   * the navigation.
+   */
 
+  /* ── State model ───────────────────────────────────────────────────
+     Colour is never the only signal. Every state also carries a text label and
+     a distinct glyph, so the model survives colour-blindness, grayscale, and
+     a screen reader. */
+  :root {
+    --safe-ink:#0f6b43; --safe-bg:#eaf4ee;
+    --review-ink:#8a5a00; --review-bg:#fbf2e3;
+    --prot-ink:#41505f; --prot-bg:#eef1f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --safe-ink:#8ccfa9; --safe-bg:#17231d;
+      --review-ink:#dcb974; --review-bg:#241f11;
+      --prot-ink:#a7b3c0; --prot-bg:#1b1f25;
+    }
+  }
+
+  .wrap { max-width:840px; margin:0 auto; padding:0 clamp(14px,4vw,22px) 110px; }
+
+  /* ── Header + nav ─────────────────────────────────────────────────── */
+  header.top {
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:16px 0 10px; flex-wrap:wrap;
+  }
+  .logo { display:flex; align-items:center; gap:10px; background:none; border:none;
+          padding:0; color:var(--text); cursor:pointer; min-height:auto; }
+  .logo-tile { display:grid; place-items:center; width:30px; height:30px; border-radius:8px;
+               background:var(--brand-tile); color:var(--brand-ink); flex-shrink:0; }
+  .logo-tile svg { width:21px; height:21px; display:block; }
+  .logo-word { font-weight:640; font-size:1.02rem; letter-spacing:-0.02em; }
+  .whoami { font-size:.82rem; color:var(--muted); }
+
+  nav.tabs {
+    display:flex; gap:2px; overflow-x:auto; scrollbar-width:none;
+    border-bottom:1px solid var(--border); margin-bottom:24px;
+  }
+  nav.tabs::-webkit-scrollbar { display:none; }
+  nav.tabs button {
+    background:none; border:none; border-bottom:2px solid transparent; border-radius:0;
+    color:var(--muted); padding:10px 13px; font:inherit; font-size:.92rem;
+    font-weight:520; cursor:pointer; white-space:nowrap; min-height:44px;
+  }
+  nav.tabs button:hover { color:var(--text); background:none; }
+  nav.tabs button[aria-current="page"] { color:var(--text); border-bottom-color:var(--text); font-weight:620; }
+  nav.tabs .count { font-variant-numeric:tabular-nums; opacity:.6; margin-left:5px; }
+
+  /* ── The headline decision ────────────────────────────────────────── */
+  .verdict-num {
+    font-size:clamp(1.75rem,5.5vw,2.4rem); font-weight:620; letter-spacing:-0.03em;
+    line-height:1.15; margin:0 0 8px;
+  }
+  .verdict-guard {
+    display:inline-flex; align-items:flex-start; gap:8px; margin-top:14px;
+    font-size:.9rem; color:var(--safe-ink); background:var(--safe-bg);
+    padding:8px 13px; border-radius:var(--radius-sm); font-weight:540;
+  }
+  .verdict-cta { margin:20px 0 4px; display:flex; gap:10px; flex-wrap:wrap; }
+
+  /* ── Safe / Review / Protected ────────────────────────────────────── */
+  .triptych { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:26px 0 6px; }
+  @media (max-width:620px) { .triptych { grid-template-columns:1fr; } }
+  .state-card {
+    text-align:left; width:100%; background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); padding:15px 16px; cursor:pointer; min-height:auto;
+  }
+  .state-card:hover { border-color:var(--muted); background:var(--surface); }
+  .state-tag {
+    display:inline-flex; align-items:center; gap:6px; font-size:.7rem; font-weight:700;
+    letter-spacing:.07em; text-transform:uppercase; padding:3px 8px; border-radius:5px;
+  }
+  .state-tag.safe { color:var(--safe-ink); background:var(--safe-bg); }
+  .state-tag.review { color:var(--review-ink); background:var(--review-bg); }
+  .state-tag.protected { color:var(--prot-ink); background:var(--prot-bg); }
+  .state-n { font-size:1.55rem; font-weight:620; letter-spacing:-0.025em; margin:9px 0 1px;
+             font-variant-numeric:tabular-nums; }
+  .state-note { font-size:.84rem; color:var(--muted); }
+
+  /* ── Sender cards ─────────────────────────────────────────────────── */
+  .sender {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); padding:16px 17px; margin-bottom:10px;
+  }
+  .sender-top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+  .sender-name { font-weight:600; overflow-wrap:anywhere; }
+  .sender-meta { font-size:.84rem; color:var(--muted); margin-top:2px; }
+  .sender-n { font-size:1.1rem; font-weight:620; font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+  .evidence { list-style:none; padding:0; margin:12px 0 0; }
+  .evidence li { display:flex; gap:8px; font-size:.87rem; color:var(--muted);
+                 padding:2px 0; align-items:flex-start; }
+  .evidence li .mark { flex-shrink:0; font-weight:700; color:var(--safe-ink); }
+  .evidence.held li .mark { color:var(--prot-ink); }
+
+  .sender-actions { display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; }
+  .sender-actions button { flex:1 1 auto; min-width:118px; }
+
+  /* ── Focused review ───────────────────────────────────────────────── */
+  .review-progress { font-size:.85rem; color:var(--muted); margin-bottom:10px;
+                     display:flex; justify-content:space-between; gap:10px; }
+  .review-bar { height:3px; background:var(--raised); border-radius:999px; overflow:hidden; margin-bottom:22px; }
+  .review-bar > div { height:100%; background:var(--text); width:0; transition:width .25s ease; }
+  .review-nav { display:flex; justify-content:space-between; gap:10px; margin-top:16px; }
+
+  /* ── Generic ──────────────────────────────────────────────────────── */
   button {
-    font:inherit; cursor:pointer; border-radius:10px; border:1px solid var(--border);
-    background:var(--surface); color:var(--text); padding:9px 15px;
-    transition:background .12s ease, opacity .12s ease, transform .12s ease;
+    font:inherit; cursor:pointer; border-radius:var(--radius-sm); border:1px solid var(--border);
+    background:var(--surface); color:var(--text); padding:9px 15px; min-height:42px;
   }
   button:hover:not(:disabled) { background:var(--raised); }
   button:disabled { opacity:.45; cursor:not-allowed; }
-  .primary { background:var(--accent); color:var(--accent-fg); border-color:transparent; font-weight:640; }
+  .primary { background:var(--accent); color:var(--accent-fg); border-color:transparent; font-weight:620; }
   .primary:hover:not(:disabled) { opacity:.9; background:var(--accent); }
-  .big-btn { padding:15px 28px; font-size:1.05rem; border-radius:12px; }
+  .big { padding:13px 22px; font-size:1rem; min-height:48px; }
   .danger { color:var(--danger); }
-  .link-btn { background:none; border:none; color:var(--accent); padding:6px 0; text-decoration:underline; }
+  .link-btn { background:none; border:none; color:var(--accent-text); padding:6px 0;
+              text-decoration:underline; min-height:auto; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  .hint { font-size:.85rem; color:var(--muted); }
+  .banner { background:var(--review-bg); color:var(--review-ink); padding:9px 16px;
+            font-size:.86rem; text-align:center; font-weight:540; }
 
-  /* ── The tool grid: one obvious job per tile ────────────────────────── */
-  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(255px, 1fr)); gap:14px; }
-  .tile {
-    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-    padding:20px; text-align:left; cursor:pointer; display:flex; flex-direction:column;
-    min-height:172px; width:100%;
-  }
-  .tile:hover:not(:disabled) { border-color:var(--accent); transform:translateY(-2px); background:var(--surface); }
-  .tile:disabled { cursor:default; opacity:.5; }
-  .tile .icon { font-size:1.3rem; line-height:1; margin-bottom:10px; filter:grayscale(1); opacity:.5; }
-  .tile .title { font-weight:650; letter-spacing:-0.01em; margin-bottom:5px; }
-  .tile .blurb { font-size:.87rem; color:var(--muted); flex:1; }
-  .tile .count { margin-top:14px; font-weight:700; font-size:1.22rem; letter-spacing:-0.02em; }
-  .tile .meta { font-size:.8rem; color:var(--muted); }
-  .tile.empty .count { color:var(--muted); font-weight:500; font-size:.95rem; }
+  .note { border-left:2px solid var(--border); background:var(--raised);
+          padding:12px 14px; border-radius:var(--radius-sm); margin:14px 0; font-size:.88rem; }
+  .note.safe { border-left-color:var(--safe-ink); }
+  .note.warn { border-left-color:var(--warn); }
+  .note.danger { border-left-color:var(--danger); }
+  .note ul { margin:8px 0 0; padding-left:18px; }
+  .note li { margin-bottom:4px; }
 
-  /* ── Category picker: the primary way in ───────────────────────────── */
-  .picker { margin-bottom:22px; }
-  .picker label { display:block; font-size:.82rem; color:var(--muted); margin-bottom:7px; font-weight:560; }
-  select {
-    font:inherit; width:100%; padding:14px 16px; border-radius:12px;
-    border:1px solid var(--border); background:var(--surface); color:var(--text);
-    cursor:pointer; appearance:none;
-    background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
-    background-position:calc(100% - 21px) 55%, calc(100% - 15px) 55%;
-    background-size:6px 6px, 6px 6px; background-repeat:no-repeat;
-    padding-right:44px;
-  }
-  select:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .empty { text-align:center; padding:44px 18px; }
+  .empty h2 { margin:0 0 8px; }
 
-  .cat-panel {
-    background:var(--surface); border:1px solid var(--border);
-    border-radius:var(--radius); padding:clamp(18px,4vw,24px); margin-bottom:26px;
-  }
-  .cat-head { display:flex; gap:14px; align-items:flex-start; }
-  .cat-head .icon { font-size:1.35rem; line-height:1.2; filter:grayscale(1); opacity:.55; }
-  .cat-head h2 { margin:0 0 3px; font-size:1.18rem; letter-spacing:-0.015em; }
-  .cat-head p { margin:0; color:var(--muted); font-size:.9rem; }
-  .cat-num { font-size:clamp(1.55rem,4.5vw,2rem); font-weight:640; letter-spacing:-0.025em; margin:18px 0 2px; }
-  .cat-sub { color:var(--muted); font-size:.92rem; }
-  .cat-actions { display:flex; gap:9px; flex-wrap:wrap; margin-top:18px; }
-  @media (max-width:560px) {
-    .cat-actions { flex-direction:column; }
-    .cat-actions .big-btn { width:100%; }
-    .stat-row { grid-template-columns:1fr 1fr; }
-    .stat-row .stat:last-child { grid-column:1 / -1; }
-    /* The action tray is fixed to the bottom; on a phone its two halves must
-       stack or the buttons get pushed off the right edge. */
-    .tray-inner { flex-direction:column; align-items:stretch; gap:10px; }
-    .tray-inner > div:last-child { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-    .wrap { padding-bottom:190px; }
-  }
+  .reason-row { display:flex; justify-content:space-between; gap:12px; align-items:baseline;
+                padding:11px 0; border-bottom:1px solid var(--border); }
+  .reason-row:last-child { border-bottom:none; }
+  .reason-n { font-variant-numeric:tabular-nums; font-weight:620; white-space:nowrap; }
 
-  details.senders-pick { margin-top:18px; border-top:1px solid var(--border); padding-top:14px; }
-  details.senders-pick > summary {
-    cursor:pointer; font-size:.9rem; font-weight:580; color:var(--accent);
-    list-style:none; display:flex; justify-content:space-between; gap:10px;
-  }
-  details.senders-pick > summary::-webkit-details-marker { display:none; }
-  details.senders-pick > summary::after { content:"▾"; transition:transform .15s ease; }
-  details.senders-pick[open] > summary::after { transform:rotate(180deg); }
-  .pick-tools { display:flex; gap:8px; margin:13px 0 9px; flex-wrap:wrap; }
-  .pick-list { max-height:340px; overflow-y:auto; margin:0 -6px; padding:0 6px; }
-  .pick {
-    display:flex; align-items:flex-start; gap:11px; padding:9px 0; font-size:.9rem;
-    border-top:1px solid var(--border);
-  }
-  .pick input { margin-top:3px; width:17px; height:17px; accent-color:var(--accent); flex-shrink:0; cursor:pointer; }
-  .pick .who { flex:1; min-width:0; }
-  .pick .who b { font-weight:590; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .pick .who span { color:var(--muted); font-size:.82rem; }
-  .pick.held { opacity:.62; }
-  .pick.held .who span { color:var(--safe); }
+  .hist-row { display:flex; justify-content:space-between; gap:12px; align-items:center;
+              padding:13px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  .hist-row:last-child { border-bottom:none; }
 
-  .cat-list { display:flex; flex-direction:column; gap:1px; background:var(--border);
-              border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
-  .cat-row {
-    display:flex; align-items:center; gap:13px; width:100%; text-align:left;
-    background:var(--surface); border:none; border-radius:0; padding:14px 17px;
-  }
-  .cat-row:hover:not(:disabled) { background:var(--raised); }
-  .cat-row .ic { font-size:1.05rem; flex-shrink:0; filter:grayscale(1); opacity:.5; }
-  .cat-row .lb { flex:1; min-width:0; font-weight:580; }
-  .cat-row .lb small { display:block; font-weight:400; color:var(--muted); font-size:.81rem; }
-  .cat-row .rt { text-align:right; flex-shrink:0; font-variant-numeric:tabular-nums; }
-  .cat-row .rt b { font-weight:680; }
-  .cat-row .rt small { display:block; color:var(--muted); font-size:.78rem; }
-  .cat-row.locked .rt b { color:var(--safe); font-weight:560; font-size:.85rem; }
-
-  .section-h { font-size:.82rem; font-weight:640; text-transform:uppercase;
-               letter-spacing:.06em; color:var(--muted); margin:34px 0 12px; }
-
-  /* Collapsible secondary sections. Everything below the main workspace is one
-     of these, so the page reads as: pick a category, act, and optionally dig in
-     — rather than four blocks all shouting at once. */
-  details.fold {
-    border:1px solid var(--border); border-radius:var(--radius);
-    background:var(--surface); margin-bottom:10px; overflow:hidden;
-  }
-  details.fold > summary {
-    cursor:pointer; padding:15px 18px; font-weight:580; font-size:.94rem;
-    list-style:none; display:flex; align-items:center; justify-content:space-between;
-  }
-  details.fold > summary::-webkit-details-marker { display:none; }
-  details.fold > summary::after { content:"▾"; color:var(--muted); transition:transform .15s ease; }
-  details.fold[open] > summary { border-bottom:1px solid var(--border); }
-  details.fold[open] > summary::after { transform:rotate(180deg); }
-  details.fold > summary:hover { background:var(--raised); }
-  details.fold > *:not(summary) { padding:16px 18px; }
-  details.fold .cat-list { border:none; border-radius:0; padding:0; margin:0; }
-  details.fold .grid { padding:16px 18px; }
-
-  .tag.done { color:var(--safe); background:var(--accent-soft); font-weight:600; }
-
-  .stat-row {
-    display:grid; grid-template-columns:repeat(3, 1fr); gap:12px;
-    padding:14px 16px; margin-bottom:22px;
-    background:var(--raised); border-radius:var(--radius);
-  }
-  .stat .n { font-variant-numeric:tabular-nums; }
-  .stat .n { font-size:1.2rem; font-weight:620; letter-spacing:-0.015em; }
-  .stat .l { font-size:.8rem; color:var(--muted); }
-
-  /* ── Job screen ─────────────────────────────────────────────────────── */
-  .job-hero { text-align:center; padding:26px 0 8px; }
-  .job-hero .icon { font-size:3rem; }
-  .job-num { font-size:clamp(1.7rem, 5vw, 2.3rem); font-weight:640; letter-spacing:-0.025em; margin:10px 0 2px; }
-  .panel {
-    background:var(--surface); border:1px solid var(--border);
-    border-radius:var(--radius); padding:18px 20px; margin:18px 0;
-  }
-  .sender-line { display:flex; justify-content:space-between; gap:12px; padding:7px 0; font-size:.92rem; }
-  .sender-line + .sender-line { border-top:1px solid var(--border); }
-  .safe-box {
-    border-left:2px solid var(--safe); background:var(--raised);
-    padding:12px 14px; border-radius:var(--radius-sm); margin:14px 0; font-size:.88rem;
-  }
-  .warn-box { border-left:2px solid var(--warn); background:var(--raised); padding:12px 14px; border-radius:var(--radius-sm); margin:14px 0; font-size:.9rem; }
-  .center { text-align:center; }
-
-  .bar { height:7px; background:var(--raised); border-radius:999px; overflow:hidden; margin:18px 0; }
-  .bar > div { height:100%; background:var(--accent); width:0; transition:width .3s ease; }
-  .ticker { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.83rem; color:var(--muted); min-height:1.5em; }
-  .banner {
-    background:var(--warn); color:#1a1917; padding:9px 20px; font-size:.86rem;
-    text-align:center; font-weight:560;
-  }
-
-  /* ── Advanced (sender-by-sender) ────────────────────────────────────── */
-  .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:15px 17px; margin-bottom:9px; }
-  .card.selected { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
-  .card.locked { opacity:.72; }
-  .card-top { display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-  .name { font-weight:620; overflow-wrap:anywhere; }
-  .tags { display:flex; gap:6px; flex-shrink:0; }
-  .tag { font-size:.71rem; padding:2px 8px; border-radius:999px; background:var(--raised); color:var(--muted); white-space:nowrap; }
-  .tag.protected { color:var(--safe); }
-  .stats-line { color:var(--muted); font-size:.85rem; margin:4px 0 5px; }
-  .reason { font-size:.85rem; color:var(--muted); margin-bottom:11px; }
-  .actions { display:flex; gap:7px; flex-wrap:wrap; }
-  .actions button { flex:1 1 auto; min-width:132px; }
-  .lock-note { font-size:.83rem; color:var(--safe); }
-  .toolbar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
-
-  .tray { position:fixed; left:0; right:0; bottom:0; background:var(--surface); border-top:1px solid var(--border); padding:13px 20px; box-shadow:0 -8px 24px rgba(0,0,0,.07); }
-  .tray-inner { max-width:900px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; }
-
-  dialog { border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); color:var(--text); padding:24px; max-width:520px; width:calc(100% - 36px); }
-
-  /* ── Reader ─────────────────────────────────────────────────────────── */
-  /* display MUST NOT be set on the base rule — that overrides the UA's
-     `display:none` for a closed <dialog>, so the empty shell renders inline at
-     the bottom of the page. Only the [open] state gets a display value. */
-  dialog.reader { max-width:760px; width:calc(100% - 24px); max-height:86vh; padding:0; }
+  dialog { border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);
+           color:var(--text); padding:22px; max-width:520px; width:calc(100% - 28px); }
+  dialog::backdrop { background:rgba(0,0,0,.55); }
+  dialog.reader { max-width:760px; max-height:86vh; padding:0; }
   dialog.reader[open] { display:flex; flex-direction:column; }
-  .reader-head {
-    display:flex; align-items:center; justify-content:space-between; gap:12px;
-    padding:16px 20px; border-bottom:1px solid var(--border); position:sticky; top:0;
-    background:var(--surface); border-radius:var(--radius) var(--radius) 0 0;
-  }
-  .reader-head strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.95rem; }
-  #readerBody { padding:18px 20px 24px; overflow-y:auto; }
-  .msg-list { display:flex; flex-direction:column; }
-  .msg {
-    display:block; width:100%; text-align:left; border:none; border-radius:0;
-    border-top:1px solid var(--border); background:none; padding:11px 4px;
-  }
-  .msg:hover { background:var(--raised); }
-  .msg-sub { display:block; font-weight:580; font-size:.92rem; }
-  .msg-meta { display:block; color:var(--muted); font-size:.79rem; margin:2px 0 3px; }
-  .msg-snip { display:block; color:var(--muted); font-size:.83rem; }
-  /* pre-wrap, not a rendered document: message HTML is converted to text
-     server-side, so there is nothing here that can execute or phone home. */
-  .msg-body {
-    white-space:pre-wrap; word-break:break-word; font:inherit; font-size:.9rem;
-    line-height:1.6; margin:0; background:var(--raised); padding:14px;
-    border-radius:10px; max-height:52vh; overflow-y:auto;
-  }
-  dialog::backdrop { background:rgba(0,0,0,.45); }
-  .excl { font-size:.86rem; color:var(--muted); margin:5px 0; }
-  .excl b { color:var(--safe); font-weight:600; }
+  .reader-head { display:flex; align-items:center; justify-content:space-between; gap:12px;
+                 padding:15px 18px; border-bottom:1px solid var(--border); }
+  .reader-head strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.93rem; }
+  #readerBody { padding:16px 18px 22px; overflow-y:auto; }
+  .msg { display:block; width:100%; text-align:left; border:none; border-radius:0;
+         border-top:1px solid var(--border); background:none; padding:11px 4px; }
+  .msg-sub { display:block; font-weight:570; font-size:.9rem; }
+  .msg-meta { display:block; color:var(--muted); font-size:.78rem; margin:2px 0 3px; }
+  .msg-snip { display:block; color:var(--muted); font-size:.82rem; }
+  .msg-body { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:.89rem;
+              line-height:1.6; margin:0; background:var(--raised); padding:14px;
+              border-radius:var(--radius-sm); max-height:52vh; overflow-y:auto; }
 
-  @media (max-width:520px) {
-    .wrap { padding:18px 14px 130px; }
-    .grid { grid-template-columns:1fr; }
-    .stat-row { gap:18px; padding:14px; }
-    .big-btn { width:100%; }
+  @media (max-width:560px) {
+    .sender-actions button { flex:1 1 100%; }
+    .verdict-cta .big { width:100%; }
   }
 </style>
 </head>
 <body>
 <div id="demoBanner" class="banner hidden">
-  Demo inbox — synthetic data, no Gmail connected. Actions are blocked at the final step.
+  Demo inbox — synthetic data, no Gmail connected. Actions stop before the Gmail call.
 </div>
 
 <div class="wrap">
-  <header>
-    <!-- The brand is the way home from every screen. It is a real <button>
-         rather than a styled span so it is keyboard-reachable and announced as
-         a control. -->
-    <button class="logo" id="goHome" title="Back to all categories">
+  <header class="top">
+    <button class="logo" id="goHome" title="Overview">
       <span class="logo-tile" aria-hidden="true">
-        <svg viewBox="0 0 100 100" fill="none" aria-hidden="true">
-        <rect x="18" y="30" width="64" height="44" rx="8" stroke="currentColor" stroke-width="8"/>
-        <path d="M22 34l24 18a5 5 0 0 0 8 0l24-18" stroke="currentColor" stroke-width="8"
-              stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
+        <svg viewBox="0 0 100 100" fill="none">
+          <rect x="18" y="30" width="64" height="44" rx="8" stroke="currentColor" stroke-width="8"/>
+          <path d="M22 34l24 18a5 5 0 0 0 8 0l24-18" stroke="currentColor" stroke-width="8"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
       </span>
       <span class="logo-word">mailwarden</span>
     </button>
-    <span class="plan" id="plan"></span>
+    <span class="whoami" id="plan"></span>
   </header>
 
-  <!-- ── Screen 1: Scan ───────────────────────────────────────────────── -->
+  <nav class="tabs hidden" id="tabs" aria-label="Sections"></nav>
+
   <section id="scan" class="hidden">
     <h1>Let's look at your inbox</h1>
-    <p class="sub">We read headers only — sender, date, size. Never message content.</p>
-    <button class="primary big-btn" id="startScan">Scan my inbox</button>
-    <div id="scanProgress" class="hidden">
-      <div class="bar"><div id="bar"></div></div>
-      <div class="ticker" id="ticker">Connecting…</div>
+    <p class="lede">
+      Mailwarden reads headers only — sender, date, size, and Gmail's own labels.
+      Message bodies are never part of the scan.
+    </p>
+    <button class="primary big" id="startScan">Scan my inbox</button>
+    <div id="scanProgress" class="hidden" style="margin-top:22px">
+      <div class="review-bar"><div id="bar"></div></div>
+      <div class="hint" id="ticker" aria-live="polite">Connecting…</div>
     </div>
   </section>
 
-  <!-- ── Screen 2: the tool grid ──────────────────────────────────────── -->
-  <section id="home" class="hidden">
-    <h1>What do you want to clean?</h1>
-    <p class="sub">Pick a category. You'll see exactly what happens before anything moves.</p>
-    <div class="stat-row" id="stats"></div>
-
-    <div class="picker">
-      <label for="catSelect">Choose a category</label>
-      <select id="catSelect"></select>
-    </div>
-    <div class="cat-panel" id="catPanel"></div>
-
-    <!-- The dropdown already covers every category, so the full list is a
-         secondary way to browse rather than a second primary control competing
-         with it. Collapsed by default keeps one obvious path down the page. -->
-    <details class="fold">
-      <summary>Browse all categories</summary>
-      <div class="cat-list" id="catList"></div>
-    </details>
-
-    <details class="fold">
-      <summary>One-click cleanups</summary>
-      <div class="grid" id="tiles"></div>
-    </details>
-
-    <details class="fold">
-      <summary>Advanced — decide sender by sender</summary>
-      <p class="excl" style="margin:12px 0 14px">
-        Every sender we found, with the reason for each decision. This is also
-        where you read mail, unsubscribe, and pin senders as protected.
-      </p>
-      <button id="toAdvanced">Open sender review</button>
-    </details>
-  </section>
-
-  <!-- ── Screen 3: one job ────────────────────────────────────────────── -->
-  <section id="job" class="hidden">
-    <button class="link-btn" id="jobBack">← All tools</button>
-    <div class="job-hero">
-      <div class="icon" id="jobIcon"></div>
-      <div class="job-num" id="jobCount"></div>
-      <div class="sub" id="jobSub" style="margin-bottom:0"></div>
-    </div>
-    <div class="panel" id="jobSenders"></div>
-    <div id="jobNotes"></div>
-    <div class="center" style="margin-top:24px">
-      <button class="primary big-btn" id="jobRun"></button>
-      <p class="excl" style="margin-top:12px">Reversible for 30 days. Nothing is permanently deleted.</p>
-    </div>
-  </section>
-
-  <!-- ── Screen 4: receipt ────────────────────────────────────────────── -->
-  <section id="receipt" class="hidden">
-    <div class="job-hero">
-      <div class="icon">✅</div>
-      <div class="job-num" id="receiptCount"></div>
-      <div class="sub" id="receiptDetail"></div>
-    </div>
-    <div class="safe-box" id="receiptNote"></div>
-    <div class="center" style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:20px">
-      <button class="primary big-btn" id="doneBtn">Clean something else</button>
-      <button id="undoBtn">Undo everything</button>
-    </div>
-  </section>
-
-  <!-- ── Advanced: sender by sender ───────────────────────────────────── -->
-  <section id="review" class="hidden">
-    <button class="link-btn" id="advBack">← All tools</button>
-    <h1 id="reviewTitle" style="margin-top:14px">Review</h1>
-    <p class="sub" id="reviewSub"></p>
-    <div class="toolbar">
-      <button id="filterSuggested">Suggested only</button>
-      <button id="filterAll">Show all</button>
-      <button id="selectSuggested">Select all suggested</button>
-    </div>
-    <div class="picker">
-      <label for="revCat">Filter by category</label>
-      <select id="revCat"></select>
-    </div>
-    <div id="senders"></div>
-  </section>
+  <section id="overview" class="hidden"></section>
+  <section id="list" class="hidden"></section>
+  <section id="review" class="hidden"></section>
+  <section id="protectedView" class="hidden"></section>
+  <section id="history" class="hidden"></section>
+  <section id="receipt" class="hidden"></section>
 </div>
 
-<dialog id="confirmDialog">
-  <h2 style="margin:0 0 10px; font-size:1.15rem; letter-spacing:-0.01em">Confirm</h2>
+<dialog id="confirmDialog" aria-labelledby="confirmTitle">
+  <h2 id="confirmTitle" style="margin:0 0 12px; font-size:1.1rem">Confirm</h2>
   <div id="confirmBody"></div>
-  <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:20px">
+  <div class="row" style="justify-content:flex-end; margin-top:18px">
     <button id="cancelConfirm">Cancel</button>
     <button class="primary" id="reallyConfirm">Confirm</button>
   </div>
 </dialog>
 
-<dialog id="readerDialog" class="reader">
+<dialog id="readerDialog" class="reader" aria-labelledby="readerTitle">
   <div class="reader-head">
     <strong id="readerTitle"></strong>
     <button id="closeReader">Close</button>
   </div>
   <div id="readerBody"></div>
 </dialog>
-
-<div class="tray hidden" id="tray">
-  <div class="tray-inner">
-    <div id="trayText"></div>
-    <div style="display:flex; gap:8px;">
-      <button id="clearSel">Clear</button>
-      <button class="primary" id="confirmBtn">Review &amp; confirm</button>
-    </div>
-  </div>
-</div>
 
 <script type="module" src="/app.js"></script>
 </body>

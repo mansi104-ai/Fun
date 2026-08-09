@@ -39,20 +39,34 @@
     <span class="brand-word">mailwarden</span>
   </a>
 
-  <h1>Founding 100</h1>
+  <h1>Plans</h1>
   <p class="lede">
-    One payment. Lifetime access. Only 100 seats exist — and that is not a
-    marketing number.
+    The free tier is not a demo. It scans everything, classifies everything, explains
+    everything, and runs one complete cleanup for real — so you know what you are
+    paying for before you pay.
   </p>
+
+  <div class="card">
+    <div class="price" style="font-size:1.7rem">Free <small>· ₹0</small></div>
+    <p class="muted" style="margin:6px 0 0">Understand your inbox.</p>
+    <ul>
+      <li>Full scan and Safe / Review / Protected classification</li>
+      <li>Every decision explained with real evidence</li>
+      <li>One complete cleanup, executed for real</li>
+      <li>Protection controls and undo</li>
+    </ul>
+  </div>
 
   <div class="card hero">
     <div class="seats" id="seats">Checking availability…</div>
     <div class="price" id="heroPrice">₹799 <small>once — not per year</small></div>
+    <p class="muted" style="margin:6px 0 0">
+      <strong>Founding 100.</strong> Everything below, for life. Only 100 exist.
+    </p>
     <ul>
-      <li>Unlimited cleanups, forever</li>
-      <li>Two-pass classification — every ambiguous sender gets a second, deeper review</li>
+      <li>Unlimited cleanups</li>
       <li>Scheduled re-scans, so your inbox stays clean without you</li>
-      <li>Unsubscribe, with verification that the sender actually honoured it</li>
+      <li>Unsubscribe with verification that the sender honoured it</li>
       <li>Up to 5 Gmail accounts</li>
       <li>Every future feature, at no extra cost</li>
     </ul>
@@ -60,8 +74,7 @@
     <div id="upiStep1">
       <button class="btn block" id="upiStart">Pay with UPI</button>
       <p class="muted" style="margin:12px 0 0; text-align:center">
-        No card fee — the whole amount goes into building this.
-        You will sign in with Google first, so we know which inbox the seat is for.
+        No card fee. You sign in with Google first, so we know which inbox the seat is for.
       </p>
     </div>
 
@@ -74,34 +87,39 @@
       <div id="upiRef" class="ref-code"></div>
       <a class="btn block" id="upiOpen" href="#">Open my UPI app</a>
       <p class="muted" style="margin:14px 0 0">
-        Scan from another phone, or tap the button on this one. Your seat is
-        activated as soon as we see the payment — usually within a few hours.
+        Scan from another phone, or tap here on this one. Your seat activates as soon
+        as we see the payment.
       </p>
     </div>
 
     <p class="muted hidden" id="upiUnavailable" style="margin:16px 0 0; text-align:center">
-      Payments are opening shortly — leave your address below and you get first refusal.
+      Payments open shortly — leave your address below for first refusal.
     </p>
   </div>
 
-  <!-- Why 100 is a real number, not scarcity theatre. This is the most
-       persuasive paragraph on the page precisely because it admits a
-       limitation rather than claiming a benefit. -->
-  <div class="note">
-    <b>Why only 100?</b> Google caps unverified apps at 100 users while its
-    review runs. That review is what the founding seats pay for. So the limit is
-    imposed on us, not invented for you — and when it lifts, the price goes up
-    and the lifetime deal ends.
+  <div class="card">
+    <div class="price" style="font-size:1.7rem">Power <small>· later</small></div>
+    <p class="muted" style="margin:6px 0 0">For people with too much email.</p>
+    <ul>
+      <li>Multiple accounts, advanced automation, sender and domain rules</li>
+    </ul>
+    <p class="muted" style="margin:0">
+      Not built yet. Founding seats include it when it ships.
+    </p>
   </div>
 
-  <!-- Stated plainly rather than discovered at the payment step. UPI settles
-       through Indian banks only; a foreign card cannot pay it at all. -->
+  <div class="note">
+    <b>Why only 100?</b> Google caps unverified apps at 100 users while its review
+    runs. That review is what the founding seats pay for. The limit is imposed on us,
+    not invented for you — and when it lifts, the lifetime deal ends.
+  </div>
+
   <div class="card" id="intlCard">
     <h2 style="margin:0 0 6px">Paying from outside India?</h2>
     <p class="muted" style="margin:0">
-      UPI only works with Indian banks, so it cannot take an international card.
-      Card checkout is <span id="intlState">not open yet</span> — leave your
-      address below and we will write to you the moment it is.
+      UPI settles through Indian banks only, so it cannot take an international card.
+      Card checkout is <span id="intlState">not open yet</span> — leave your address
+      below and we will write the moment it is.
     </p>
     <button class="btn ghost hidden" id="buyFounding">Pay by card</button>
   </div>

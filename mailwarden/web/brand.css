@@ -67,24 +67,28 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #141413;
-    --surface: #1b1b19;
-    --raised: #232320;
-    --border: #2e2e2b;
-    --text: #e6e5e1;
-    --muted: #9a988f;
+    /* Surface ladder per spec: base / surface / elevated.
+       Text is #EDEDED rather than #F5F5F5 — on #0A0A0A that is ~16:1 instead of
+       ~18:1. Both clear AAA by a wide margin; the lower one avoids the halation
+       that made the previous build read as harsh. */
+    --bg: #0a0a0a;
+    --surface: #111113;
+    --raised: #18181b;
+    --border: #26262a;
+    --text: #ededed;
+    --muted: #a1a1aa;
 
-    --accent: #e6e5e1;
-    --accent-fg: #141413;
-    --accent-text: #e6e5e1;
-    --accent-soft: #232320;
+    --accent: #ededed;
+    --accent-fg: #0a0a0a;
+    --accent-text: #ededed;
+    --accent-soft: #18181b;
 
     --danger: #e59a90;
     --warn: #d9b36a;
     --safe: #86c2a1;
 
-    --brand-tile: #e6e5e1;
-    --brand-ink: #141413;
+    --brand-tile: #ededed;
+    --brand-ink: #0a0a0a;
   }
 }
 

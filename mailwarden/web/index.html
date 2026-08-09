@@ -51,79 +51,88 @@
     <span class="brand-word">mailwarden</span>
   </a>
   <span class="badge">Founding 100 · closed beta</span>
-  <h1>Clean your Gmail without ever losing anything.</h1>
-  <p style="font-size:1.15rem; color:var(--accent-text); margin:0 0 14px">
-    Clean inbox. Clear mind. More focus.
-  </p>
+
+  <h1>Clean your Gmail.<br>Without losing what matters.</h1>
   <p class="lede">
-    Mailwarden groups your inbox by <strong>sender</strong>, not by message.
-    You make about 200 decisions instead of 40,000 — and every one of them is
-    reversible.
+    Mailwarden finds the clutter, shows you why it thinks each sender is safe,
+    and waits for your approval before anything moves.
   </p>
 
   <form id="inviteForm" class="signup">
     <input type="email" id="inviteEmail" required autocomplete="email"
            placeholder="you@gmail.com" />
-    <button class="btn" type="submit">Request my seat</button>
+    <button class="btn" type="submit">Clean my Gmail →</button>
   </form>
   <p class="muted" id="inviteMsg" style="margin:12px 0 0"></p>
   <p class="muted" style="margin:6px 0 0">
-    We add you by hand, usually within a few hours, and email you a link.
-    <a href="/pricing.html">See what a seat includes</a> ·
+    We add you by hand, usually within a few hours.
+    <a href="/pricing.html">See plans</a> ·
     <a href="/auth/google">Already invited? Sign in</a>
   </p>
 
-  <!-- The consent screen is the highest-anxiety moment in the funnel.
-       Answering the obvious objections BEFORE the Google redirect converts
-       better than answering them after. See docs/04-ui-design-spec.md §5. -->
-  <div class="card">
-    <h3>What we ask for, and why</h3>
-    <ul>
-      <li>We request permission to <strong>archive, label, and move mail to trash</strong>.</li>
-      <li>We do <strong>not</strong> request permission to permanently delete anything —
-          Google will not even grant us that ability with the access we use.</li>
-      <li>We never <strong>store</strong> message content. Sorting your mail uses
-          only senders, dates, sizes, and Gmail's own labels.</li>
-      <li>A message is fetched only when <strong>you click to read it</strong>, is
-          shown to you, and is never saved, logged, or sent to an AI model.</li>
-      <li>Trashed mail sits in Gmail for 30 days. You can restore it from Gmail
-          itself, even if you cancel us.</li>
-      <li>Disconnect any time and we erase everything within 24 hours.</li>
-    </ul>
-    <p class="muted">
-      Beta note: while our Google verification is in progress, access is capped at
-      100 users and you may occasionally be asked to reconnect.
-    </p>
+  <!-- The positioning sentence. It is the whole product in two lines, and it is
+       the one thing a competitor cannot copy without rebuilding their engine. -->
+  <div class="card" style="margin-top:32px">
+    <p style="margin:0 0 6px" class="muted">We don't ask</p>
+    <p style="margin:0 0 14px; font-size:1.1rem"><s>"What can we delete?"</s></p>
+    <p style="margin:0 0 6px" class="muted">We ask</p>
+    <p style="margin:0; font-size:1.1rem"><strong>"What are we confident you don't need?"</strong></p>
   </div>
 
   <h2>How it works</h2>
   <div class="card">
-    <p><strong>1 · Scan.</strong> We read message headers only — sender, date, size,
-    and Gmail's own labels. Message bodies are never part of the scan. A large
-    inbox takes two to six minutes.</p>
-    <p><strong>2 · Review.</strong> One card per sender, sorted by how much of your
-    inbox they occupy, each showing why we classified it that way. Receipts,
-    boarding passes, login codes, and anyone you've replied to are locked by default.</p>
-    <p style="margin:0"><strong>3 · Confirm.</strong> Nothing moves until you approve a
-    summary showing exactly what will happen. Then you get a receipt with an
-    Undo button that works for 30 days.</p>
+    <p><strong>1 · Scan.</strong> Headers only — sender, date, size, and Gmail's own
+    labels. Message bodies are never part of the scan.</p>
+    <p><strong>2 · Understand.</strong> Your inbox collapses from tens of thousands of
+    messages to a few hundred senders. That is the unit you actually decide about.</p>
+    <p><strong>3 · Protect.</strong> Starred mail, conversations you replied to, receipts,
+    login codes, bank and travel mail, attachments, and anything Mailwarden does not
+    understand are all held back automatically.</p>
+    <p><strong>4 · Review.</strong> One sender at a time, with the evidence in view —
+    unread rate, reply history, how long since they last wrote.</p>
+    <p style="margin:0"><strong>5 · Clean.</strong> Nothing moves until you approve it.
+    Then you get a receipt and an Undo button that works for 30 days.</p>
+  </div>
+
+  <h2>Safe by design</h2>
+  <div class="card">
+    <ul>
+      <li><strong>It cannot permanently delete anything.</strong> Google does not grant
+      Mailwarden that ability with the access it uses — this is enforced by the
+      permission itself, not by a promise.</li>
+      <li><strong>Archive over trash.</strong> Archived mail stays in All Mail forever.
+      Trash is offered, but it is the only action with a deadline and it is labelled as one.</li>
+      <li><strong>Everything is reversible for 30 days</strong>, and undo is verified —
+      Mailwarden reads Gmail back to confirm the restore rather than assuming it worked.</li>
+      <li><strong>When Mailwarden isn't sure, it doesn't touch it.</strong>
+      Missing some clutter is an acceptable cost. Touching something you needed is not.</li>
+    </ul>
+  </div>
+
+  <h2>Your email is yours</h2>
+  <div class="card">
+    <ul>
+      <li>Sorting uses headers only — sender, date, size, Gmail's labels.</li>
+      <li>Subjects are stored as a salted hash, never as readable text.</li>
+      <li>A message is fetched only when <strong>you</strong> open it, and is never saved.</li>
+      <li>No message content is ever sent to an AI model. Classification runs on
+      aggregate statistics about senders.</li>
+      <li>Disconnect any time and everything is erased within 24 hours.</li>
+    </ul>
+    <p class="muted" style="margin:0">
+      Beta note: while Google's review runs, access is capped at 100 users and you
+      may occasionally be asked to reconnect.
+    </p>
   </div>
 
   <h2>Pricing</h2>
   <div class="card">
-    <p><strong>Free</strong> — full scan, full sorting, and one complete sender
-    cleanup, executed for real. No card.</p>
-    <p style="margin:0"><strong>Founding 100 · ₹799 once</strong> — unlimited
-    cleanups, scheduled re-scans, unsubscribe verification, up to 5 accounts,
-    and every future feature. One payment, not a subscription.
-    <a href="/pricing.html">See the details</a>.</p>
+    <p><strong>Free</strong> — full scan, full Safe/Review/Protected classification,
+    every explanation, and one complete cleanup executed for real. No card.</p>
+    <p style="margin:0"><strong>Founding 100 · ₹799 once</strong> — unlimited cleanups,
+    scheduled re-scans, unsubscribe verification, up to 5 accounts, and every future
+    feature. One payment, not a subscription. <a href="/pricing.html">See plans</a>.</p>
   </div>
-  <p class="muted">
-    We will never sell your data or your metadata. That is not a policy we could
-    quietly change — the business model is subscriptions, and the architecture
-    doesn't retain enough to sell.
-  </p>
 </main>
+
 <script type="module" src="/index.js"></script>
-</body>
-</html>

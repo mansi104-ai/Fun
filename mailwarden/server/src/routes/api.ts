@@ -12,6 +12,7 @@ import {
   recordFreeBatchUse,
 } from "../lib/entitlements.js";
 import { computeCategories, senderKeysForCategory } from "../categories.js";
+import { computeOverview, sendersInState } from "../overview.js";
 import { computeRecipes, recipeById } from "../recipes.js";
 import { LIMITS } from "../safety/limits.js";
 import { GuardError } from "../safety/policy.js";
@@ -284,6 +285,37 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
         }
         throw err;
       }
+    },
+  );
+
+  // ── Overview: Safe / Review / Protected ────────────────────────────────
+
+  /**
+   * The product's central model. Every number is derived from state the engine
+   * already acts on — nothing here is a new classification, and nothing is
+   * estimated.
+   */
+  app.get("/api/overview", async (req, reply) => {
+    const ctx = requireAccount(req, reply);
+    if (!ctx) return;
+    return computeOverview(ctx.accountId);
+  });
+
+  /** Sender cards for one state, with observed evidence rather than prose. */
+  app.get<{ Querystring: { state?: string; limit?: string } }>(
+    "/api/senders/state",
+    async (req, reply) => {
+      const ctx = requireAccount(req, reply);
+      if (!ctx) return;
+
+      const state = req.query.state ?? "safe";
+      if (state !== "safe" && state !== "review" && state !== "protected") {
+        return reply.code(400).send({ error: "invalid_state" });
+      }
+      return {
+        state,
+        senders: sendersInState(ctx.accountId, state, Number(req.query.limit ?? 200)),
+      };
     },
   );
 
