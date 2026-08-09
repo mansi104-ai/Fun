@@ -12,11 +12,25 @@
  * body reappears in web/.
  */
 const $ = (id) => document.getElementById(id);
+
+/**
+ * The Content-Type header is set ONLY when there is a body to describe.
+ *
+ * Sending `Content-Type: application/json` with an empty body makes Fastify
+ * reject the request outright with FST_ERR_CTP_EMPTY_JSON_BODY — a 400 before
+ * the handler ever runs. Every bodyless POST in this app hit that: starting a
+ * scan, executing a batch, and undoing one. The scan button simply hung on
+ * "Connecting…" because the rejection was never surfaced.
+ */
 const api = async (url, opts = {}) => {
+  const hasBody = opts.body !== undefined && opts.body !== null;
   const res = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
     ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    headers: {
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
+      ...(opts.headers ?? {}),
+    },
+    body: hasBody ? JSON.stringify(opts.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.message || data.error || res.statusText), { data, status: res.status });
@@ -52,8 +66,22 @@ let reviewCat = "";
 $("startScan").onclick = async () => {
   $("startScan").disabled = true;
   $("scanProgress").classList.remove("hidden");
-  await api("/api/scan", { method: "POST" });
-  streamProgress();
+  $("ticker").textContent = "Starting…";
+  try {
+    const res = await api("/api/scan", { method: "POST" });
+    // A scan already running is not an error — reattach to it rather than
+    // telling the user nothing happened.
+    if (res.alreadyRunning) $("ticker").textContent = "A scan is already running — reattaching…";
+    streamProgress();
+  } catch (err) {
+    // Never leave the button dead with a spinner. An unreported failure here
+    // is indistinguishable from a hang, which is exactly how the empty-body
+    // 400 stayed invisible.
+    $("bar").style.width = "0";
+    $("ticker").textContent = `Could not start the scan: ${err.message}`;
+    $("startScan").disabled = false;
+    $("startScan").textContent = "Try again";
+  }
 };
 
 function renderProgress(p) {
