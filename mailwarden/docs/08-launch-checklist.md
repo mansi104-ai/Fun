@@ -66,7 +66,7 @@ flyctl secrets set --app mailwarden \
   DIRECT_UPI_ID=mkb.kalra-1@okhdfcbank \
   DIRECT_PAYEE_NAME="Mailwarden" \
   DIRECT_PAY_INR=4200 \
-  ADMIN_EMAIL=businessandbrands.india@gmail.com
+  ADMIN_EMAIL=mkb.kalra@gmail.com
 ```
 
 The pricing page shows the UPI section only once `DIRECT_UPI_ID` is set —
@@ -78,7 +78,12 @@ Indian buyers and treat them as a separate segment.
 
 ### Granting a seat after a UPI payment
 
-Signed in as `ADMIN_EMAIL`:
+Signed in as `ADMIN_EMAIL` — which is **mkb.kalra@gmail.com**, the operator
+account, not one of the test users:
+
+> **Prerequisite:** the admin account has to be able to sign in, and signing in
+> requires being on Google's **Test users** list like everyone else. Add
+> mkb.kalra@gmail.com there first, or the grant endpoint stays unreachable.
 
 ```bash
 curl -X POST https://mailwarden.fly.dev/api/billing/grant \
