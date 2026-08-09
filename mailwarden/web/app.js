@@ -380,7 +380,8 @@ async function runCategory(id, action) {
   try {
     await confirmAndRun(await planOnce(false), () => planOnce(true));
   } catch (err) {
-    alert(err.status === 402 ? err.data.message : `Something went wrong: ${err.message}`);
+    if (err.status === 402) return upgradePrompt(err.data.message);
+    alert(`Something went wrong: ${err.message}`);
   }
 }
 
@@ -525,7 +526,7 @@ async function confirmAndRun(plan, replan) {
       showReceipt(done.messageCount, done.bytesFreed, done.action);
     } catch (err) {
       $("confirmDialog").close();
-      if (err.status === 402) alert(err.data.message);
+      if (err.status === 402) upgradePrompt(err.data.message);
       else if (err.status === 409) alert(`Blocked by the safety policy: ${err.data.message}`);
       else alert(`Could not complete: ${err.message}`);
     } finally {
@@ -811,6 +812,18 @@ async function openMessage(id) {
 }
 
 $("closeReader").onclick = () => $("readerDialog").close();
+
+/**
+ * A paywall that only says "no" wastes the moment the user is most willing to
+ * pay. Send them somewhere they can actually buy.
+ */
+function upgradePrompt(message) {
+  if (confirm(`${message}
+
+Open the Founding 100 page?`)) {
+    window.location.href = "/pricing.html";
+  }
+}
 
 // ── Boot ─────────────────────────────────────────────────────────────
 (async () => {

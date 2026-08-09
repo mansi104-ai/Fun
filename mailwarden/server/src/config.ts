@@ -73,6 +73,7 @@ export const config = {
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY ?? "",
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+    priceFounding: process.env.STRIPE_PRICE_ID_FOUNDING ?? "",
     priceStarter: process.env.STRIPE_PRICE_ID_STARTER ?? "",
     pricePro: process.env.STRIPE_PRICE_ID_PRO ?? "",
   },

@@ -23,7 +23,8 @@ import { planBatch } from "./gmail/executor.js";
 import { aggregateSenders } from "./gmail/sync.js";
 import { isPubliclyRoutable, parseTargets } from "./gmail/unsubscribe.js";
 import { newId } from "./lib/crypto.js";
-import { canExecuteBatch, entitlementsFor } from "./lib/entitlements.js";
+import { FOUNDING_SEATS, foundingSeatsSold, requestAccess } from "./lib/billing.js";
+import { canExecuteBatch, entitlementsFor, setPlan } from "./lib/entitlements.js";
 import { DAY_MS, LIMITS } from "./safety/limits.js";
 import { assertExecutable, evaluate, GuardError, type CandidateMessage } from "./safety/policy.js";
 
@@ -714,6 +715,70 @@ for (const [url, expected, label] of ssrf) {
   check(`SSRF guard: ${label} -> ${expected ? "allowed" : "blocked"}`, got === expected, url);
 }
 
+// ── 13d. Billing ─────────────────────────────────────────────────────────
+
+section("13d. Billing: seats, idempotency, and entitlements");
+
+const billUser = newId("usr");
+db.prepare(`INSERT INTO users (id, email, plan, created_at, updated_at) VALUES (?,?,?,?,?)`).run(
+  billUser, `${billUser}@test.local`, "free", Date.now(), Date.now(),
+);
+
+check("Founding plan grants Pro-level entitlements", (() => {
+  setPlan(billUser, "founding");
+  const e = entitlementsFor(billUser);
+  return e.premiumClassification && e.scheduledRescan && e.maxAccounts === 5;
+})());
+check("A paying plan is never batch-limited", canExecuteBatch(billUser).allowed);
+
+check("Seats sold is counted, not cached", foundingSeatsSold() >= 1);
+check("The cap is the real Google Testing limit", FOUNDING_SEATS === 100);
+
+setPlan(billUser, "free");
+check("Downgrade takes effect immediately",
+  entitlementsFor(billUser).premiumClassification === false);
+
+/**
+ * Stripe does not guarantee exactly-once delivery and retries on any non-2xx,
+ * so duplicates are normal traffic. Replaying an event must never grant a
+ * second founding seat.
+ */
+{
+  const evt = { id: `evt_${newId("x")}`, type: "checkout.session.completed" } as const;
+  db.prepare(`INSERT INTO stripe_events (id, type, created_at) VALUES (?,?,?)`).run(
+    evt.id, evt.type, Date.now(),
+  );
+  const dup = db.prepare(`SELECT COUNT(*) c FROM stripe_events WHERE id = ?`).get(evt.id) as {
+    c: number;
+  };
+  check("An event id is recorded exactly once", dup.c === 1);
+
+  let rejected = false;
+  try {
+    db.prepare(`INSERT INTO stripe_events (id, type, created_at) VALUES (?,?,?)`).run(
+      evt.id, evt.type, Date.now(),
+    );
+  } catch {
+    rejected = true;
+  }
+  check("A replayed event id cannot be inserted twice", rejected);
+  db.prepare(`DELETE FROM stripe_events WHERE id = ?`).run(evt.id);
+}
+
+check("Access requests accept a real address", requestAccess("buyer@example.com", null, "test"));
+check("…and reject a malformed one", !requestAccess("not-an-email", null, "test"));
+check("…and are deduplicated by address", (() => {
+  requestAccess("buyer@example.com", "again", "test");
+  const c = db.prepare(`SELECT COUNT(*) c FROM access_requests WHERE email = ?`)
+    .get("buyer@example.com") as { c: number };
+  return c.c === 1;
+})());
+db.prepare(`DELETE FROM access_requests WHERE email = ?`).run("buyer@example.com");
+db.prepare(`DELETE FROM users WHERE id = ?`).run(billUser);
+
+// (The webhook source-level invariants live in the source-scan section, which
+// is where `sources` is built.)
+
 // ── 14. Agent: learning, caching, and degradation ────────────────────────
 
 section("14. Agent: user decisions outrank inference");
@@ -906,6 +971,24 @@ check("Schema stores no message body or plaintext subject",
     /subject_hash\s+TEXT/.test(dbTs.text));
 check("Schema still stores subject_hash, not subject",
   /subject_hash/.test(dbTs.text) && !/\bsubject\s+TEXT/i.test(dbTs.text));
+
+// The webhook is unauthenticated by necessity, so the signature check IS the
+// security boundary. It must verify against raw bytes, never a re-serialised
+// object — index.ts keeps that route's body as a string.
+// Matched on basename AND directory: src/classify/index.ts is also called
+// index.ts, and a bare basename match silently picks the wrong file — which is
+// how this check passed against a file that could never contain the pattern.
+const indexSrc = sources.find(
+  (s) => path.basename(s.file) === "index.ts" && path.dirname(s.file) === srcRoot,
+);
+check("Webhook route is exempt from JSON re-serialisation",
+  indexSrc !== undefined && /RAW_BODY_ROUTES/.test(indexSrc.text) &&
+    indexSrc.text.includes("/api/billing/webhook"));
+
+const billingSrc = sources.find((s) => path.basename(s.file) === "billing.ts" &&
+  s.file.includes("lib"));
+check("Plans change only via a verified webhook — no client-trusted upgrade path",
+  billingSrc !== undefined && /constructEvent/.test(billingSrc.text));
 
 // The guard layer is only meaningful if it is the sole path to mutation.
 const executor = sources.find((s) => s.file.endsWith("executor.ts"))!;

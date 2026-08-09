@@ -55,7 +55,7 @@ const insertMeta = db.prepare(`
     labels = excluded.labels, is_unread = excluded.is_unread
 `);
 
-type Gmail = Awaited<ReturnType<typeof gmailFor>>;
+export type Gmail = Awaited<ReturnType<typeof gmailFor>>;
 
 /** Turns raw Gmail message metadata into a messages_meta row. */
 function toRow(accountId: string, msg: gmail_v1.Schema$Message) {

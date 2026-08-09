@@ -14,7 +14,7 @@ import {
   type Violation,
 } from "../safety/policy.js";
 import { gmailFor } from "./client.js";
-import { aggregateSenders } from "./sync.js";
+import { aggregateSenders, type Gmail } from "./sync.js";
 
 export type BatchAction = "archive" | "trash";
 
@@ -211,6 +211,27 @@ export async function executeBatch(
     }
   }
 
+  /**
+   * Refresh prior_labels to the state immediately BEFORE we act.
+   *
+   * They were captured at plan time, which can be minutes earlier. If the user
+   * starred a message, or Gmail re-categorised it, in the gap, undo would
+   * restore the stale plan-time labels and silently discard that change. The
+   * guarantee is "back to how it was before the action", not "before the plan".
+   */
+  db.transaction(() => {
+    const refresh = db.prepare(
+      `UPDATE batch_items SET prior_labels = ? WHERE batch_id = ? AND message_id = ?`,
+    );
+    for (const i of items) {
+      const current = metaById.get(i.message_id);
+      if (current && current.labels !== i.prior_labels) {
+        refresh.run(current.labels, batchId, i.message_id);
+        i.prior_labels = current.labels;
+      }
+    }
+  })();
+
   // ── Execute ──────────────────────────────────────────────────────────
   db.prepare(`UPDATE batches SET status = 'running' WHERE id = ?`).run(batchId);
 
@@ -289,9 +310,41 @@ export async function executeBatch(
 }
 
 export interface UndoResult {
+  /** Messages Gmail confirmed are back exactly as they were. */
   restored: number;
   /** Messages we could not restore; surfaced rather than silently dropped. */
   failed: number;
+  /** Gmail read back a state that does not match. Not restored. */
+  mismatched: number;
+  /**
+   * Gmail no longer has these at all — trashed mail purged after its 30 days.
+   * Reported separately because it is the one outcome nothing can reverse.
+   */
+  missing: number;
+  /** False when verification could not run; `restored` is then unproven. */
+  verified: boolean;
+}
+
+/** Labels Mailwarden itself changes, and therefore the ones it must restore. */
+const OWNED_LABELS = ["INBOX", "TRASH"] as const;
+
+/**
+ * Pages an id-only search. Listing returns 500 ids per call and no message
+ * bodies, which makes reading back the state of a 2,400-message undo a handful
+ * of requests instead of 2,400 individual fetches.
+ */
+async function idsMatching(gmail: Gmail, q: string): Promise<Set<string>> {
+  const out = new Set<string>();
+  let pageToken: string | undefined;
+  do {
+    const res = await withRetry(
+      () => gmail.users.messages.list({ userId: "me", q, maxResults: 500, pageToken }),
+      { label: `list(${q})` },
+    );
+    for (const m of res.data.messages ?? []) if (m.id) out.add(m.id);
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+  return out;
 }
 
 /**
@@ -311,7 +364,11 @@ export async function undoBatch(accountId: string, batchId: string): Promise<Und
     .get(batchId, accountId) as { id: string; action: BatchAction; status: string } | undefined;
 
   if (!batch) throw new Error("Batch not found.");
-  if (batch.status === "undone") return { restored: 0, failed: 0 };
+  // Already fully reversed and verified — nothing left to do, and re-running
+  // would report a second "restore" of messages that never moved.
+  if (batch.status === "undone") {
+    return { restored: 0, failed: 0, mismatched: 0, missing: 0, verified: true };
+  }
   if (batch.status === "pending") throw new Error("Batch was never executed — nothing to undo.");
 
   const gmail = await gmailFor(accountId);
@@ -330,14 +387,18 @@ export async function undoBatch(accountId: string, batchId: string): Promise<Und
     ids.push(item.message_id);
   }
 
-  let restored = 0;
   let failed = 0;
+  const markRestored = db.prepare(
+    `UPDATE batch_items SET restored = 1 WHERE batch_id = ? AND message_id = ?`,
+  );
 
+  // ── Phase 1: ask Gmail to put everything back ────────────────────────
   for (const [priorLabels, allIds] of groups) {
-    const hadInbox = priorLabels.split(",").includes("INBOX");
-    const add = hadInbox ? ["INBOX"] : [];
-    const remove = batch.action === "trash" ? ["TRASH"] : [];
-    if (add.length === 0 && remove.length === 0) continue;
+    const prior = new Set(priorLabels.split(",").filter(Boolean));
+    // Derived from the recorded prior state rather than assumed from the
+    // action, so a message that was already out of the inbox stays out.
+    const add = OWNED_LABELS.filter((l) => prior.has(l));
+    const remove = OWNED_LABELS.filter((l) => !prior.has(l));
 
     for (const ids of chunk(allIds, LIMITS.gmailBatchModifyLimit)) {
       try {
@@ -349,16 +410,9 @@ export async function undoBatch(accountId: string, batchId: string): Promise<Und
             }),
           { label: `undo batchModify(${ids.length})` },
         );
-        // Put the local copy back exactly as it was. prior_labels is the
-        // authoritative record of the pre-action state — the same record the
-        // Gmail call above was derived from.
         db.transaction(() => {
-          const relabel = db.prepare(
-            `UPDATE messages_meta SET labels = ? WHERE account_id = ? AND message_id = ?`,
-          );
-          for (const id of ids) relabel.run(priorLabels, accountId, id);
+          for (const id of ids) markRestored.run(batchId, id);
         })();
-        restored += ids.length;
       } catch (err) {
         // Partial undo is better than none. Report the shortfall rather than
         // failing the whole restore.
@@ -368,20 +422,97 @@ export async function undoBatch(accountId: string, batchId: string): Promise<Und
     }
   }
 
-  if (failed === 0) {
-    db.prepare(`UPDATE batches SET status = 'undone', undone_at = ? WHERE id = ?`).run(
-      now(),
-      batchId,
+  /**
+   * ── Phase 2: read Gmail back and prove it ──────────────────────────────
+   *
+   * A 200 from batchModify means the request was accepted, not that the
+   * mailbox now matches. batchModify also succeeds silently for ids Gmail no
+   * longer has — so mail permanently purged from Trash after its 30 days would
+   * otherwise be reported as restored. The guarantee is only worth stating if
+   * something checks it.
+   *
+   * Verification compares only INBOX and TRASH: those are the labels
+   * Mailwarden changes, so they are the ones it is responsible for restoring.
+   * If the user starred a message after the action, undo must not strip that.
+   */
+  let verified = false;
+  let mismatched = 0;
+  let missing = 0;
+
+  try {
+    const [inInbox, inTrash] = await Promise.all([
+      idsMatching(gmail, "in:inbox"),
+      idsMatching(gmail, "in:trash"),
+    ]);
+    verified = true;
+
+    const setVerify = db.prepare(
+      `UPDATE batch_items SET verify_state = ? WHERE batch_id = ? AND message_id = ?`,
     );
+    const relabel = db.prepare(
+      `UPDATE messages_meta SET labels = ? WHERE account_id = ? AND message_id = ?`,
+    );
+
+    db.transaction(() => {
+      for (const item of items) {
+        const prior = new Set(item.prior_labels.split(",").filter(Boolean));
+        const wantInbox = prior.has("INBOX");
+        const wantTrash = prior.has("TRASH");
+        const hasInbox = inInbox.has(item.message_id);
+        const hasTrash = inTrash.has(item.message_id);
+
+        if (hasInbox === wantInbox && hasTrash === wantTrash) {
+          setVerify.run("verified", batchId, item.message_id);
+          // Only now is the local copy known to match the mailbox.
+          relabel.run(item.prior_labels, accountId, item.message_id);
+        } else if (!hasInbox && !hasTrash && wantInbox) {
+          // Expected in the inbox, present in neither list. Either purged, or
+          // archived by someone else. Distinguished below.
+          setVerify.run("missing", batchId, item.message_id);
+          missing++;
+        } else {
+          setVerify.run("mismatch", batchId, item.message_id);
+          mismatched++;
+        }
+      }
+    })();
+  } catch (err) {
+    // Verification failing does not undo the undo — Phase 1 already ran. It
+    // means we cannot *prove* the result, which is reported rather than hidden.
+    console.error("[undo] verification pass failed:", err);
+  }
+
+  const restored = (
+    db
+      .prepare(
+        `SELECT COUNT(*) c FROM batch_items
+         WHERE batch_id = ? AND restored = 1 AND (verify_state = 'verified' OR verify_state IS NULL)`,
+      )
+      .get(batchId) as { c: number }
+  ).c;
+
+  const clean = failed === 0 && mismatched === 0 && missing === 0;
+
+  if (clean) {
+    db.prepare(`UPDATE batches SET status = 'undone', undone_at = ?, error = NULL WHERE id = ?`)
+      .run(now(), batchId);
     aggregateSenders(accountId);
     // The user reversed this, so unlearn it — see forgetUserDecisions.
     forgetUserDecisions(accountId, [...new Set(items.map((i) => i.sender_key))]);
   } else {
+    // Left as 'done', not 'undone': the batch is not fully reversed, and
+    // re-running undo is safe — restoring a label twice is a no-op.
     db.prepare(`UPDATE batches SET error = ? WHERE id = ?`).run(
-      `Undo partially failed: ${failed} message(s) not restored.`,
+      `Undo incomplete — ${failed} failed, ${mismatched} did not match, ${missing} no longer in Gmail.`,
       batchId,
     );
+    aggregateSenders(accountId);
   }
 
-  return { restored, failed };
+  console.log(
+    `[undo] ${batchId}: restored ${restored}, failed ${failed}, ` +
+      `mismatched ${mismatched}, missing ${missing}, verified=${verified}`,
+  );
+
+  return { restored, failed, mismatched, missing, verified };
 }

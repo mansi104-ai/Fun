@@ -6,6 +6,7 @@ import fastifyStatic from "@fastify/static";
 import { config } from "./config.js";
 import { authRoutes } from "./routes/auth.js";
 import { apiRoutes } from "./routes/api.js";
+import { billingRoutes } from "./routes/billing.js";
 import { demoRoutes } from "./routes/demo.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -27,10 +28,20 @@ const app = Fastify({
  *
  * Malformed JSON still fails, loudly. Only the empty case is forgiven.
  */
+/** Stripe verifies its signature against the exact bytes it sent. */
+const RAW_BODY_ROUTES = new Set(["/api/billing/webhook"]);
+
 app.addContentTypeParser(
   "application/json",
   { parseAs: "string" },
-  (_req, body, done) => {
+  (req, body, done) => {
+    // Parsing and re-serialising changes the bytes — key order, whitespace,
+    // unicode escapes — and any change invalidates the HMAC. The webhook
+    // handler therefore receives the untouched string. Getting this wrong
+    // fails closed (every webhook rejected), which looks exactly like a
+    // customer who paid and never received their plan.
+    if (RAW_BODY_ROUTES.has(req.url.split("?")[0] ?? "")) return done(null, body);
+
     const text = (body as string).trim();
     if (text.length === 0) return done(null, {});
     try {
@@ -65,6 +76,7 @@ app.get("/healthz", async () => ({ ok: true }));
 await app.register(authRoutes);
 await app.register(demoRoutes);
 await app.register(apiRoutes);
+await app.register(billingRoutes);
 
 app.get("/app", (_req, reply) => reply.sendFile("app.html"));
 

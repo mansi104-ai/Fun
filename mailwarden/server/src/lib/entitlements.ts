@@ -1,6 +1,6 @@
 import { db } from "../db.js";
 
-export type Plan = "free" | "starter" | "pro";
+export type Plan = "free" | "starter" | "pro" | "founding";
 
 export interface Entitlements {
   plan: Plan;
@@ -59,6 +59,19 @@ const PLANS: Record<Plan, Entitlements> = {
     premiumClassification: true,
     scheduledRescan: false,
     maxAccounts: 1,
+  },
+  /**
+   * The Founding 100 seat: Pro entitlements, bought once, no expiry. A distinct
+   * plan rather than pro-with-a-flag because the seat count is a public promise
+   * and has to be countable in one query.
+   */
+  founding: {
+    plan: "founding",
+    freeBatches: Number.MAX_SAFE_INTEGER,
+    scanLimit: 1_000_000,
+    premiumClassification: true,
+    scheduledRescan: true,
+    maxAccounts: 5,
   },
   pro: {
     plan: "pro",

@@ -163,6 +163,55 @@ addColumn("senders", "decided_at", "INTEGER");
 // `unsubscribed_at` is the clock that iteration 45 checks against: if mail from
 // this sender keeps arriving 14 days later, the sender ignored the request and
 // we can say so.
+// ── Billing (iterations 24–27) ───────────────────────────────────────────
+//
+// plan values: free | starter | pro | founding
+//   founding = the $49 one-time Founding 100 seat. Pro entitlements, no expiry.
+//              Deliberately a distinct plan rather than pro+flag, because the
+//              seat count is a public promise ("only 100 exist") and has to be
+//              countable with one query.
+addColumn("users", "stripe_subscription", "TEXT");
+addColumn("users", "plan_expires_at", "INTEGER");
+addColumn("users", "founding_seat", "INTEGER");
+
+// Demand captured while the Google 100-user cap is binding. This is the list
+// you work through as seats free up, and the evidence that demand exists.
+db.exec(`
+CREATE TABLE IF NOT EXISTS access_requests (
+  id          TEXT PRIMARY KEY,
+  email       TEXT NOT NULL UNIQUE,
+  note        TEXT,
+  source      TEXT,
+  invited_at  INTEGER,
+  created_at  INTEGER NOT NULL
+);
+
+-- Every Stripe event we accept, so a replayed or duplicated webhook cannot
+-- grant a second seat or double-count revenue. Stripe explicitly does not
+-- guarantee exactly-once delivery.
+CREATE TABLE IF NOT EXISTS stripe_events (
+  id          TEXT PRIMARY KEY,
+  type        TEXT NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+`);
+
+/**
+ * Per-message undo state, so the round-trip guarantee is a fact rather than an
+ * assumption.
+ *
+ *   restored      1 once Gmail has been asked to put this message back
+ *   verify_state  what a READ-BACK of Gmail actually found:
+ *                   verified   labels we changed match prior_labels exactly
+ *                   mismatch   Gmail disagrees; the message is not restored
+ *                   missing    Gmail no longer has it (purged after 30 days)
+ *
+ * Without these, a partial undo cannot resume precisely and cannot tell the
+ * user WHICH messages are still wrong.
+ */
+addColumn("batch_items", "restored", "INTEGER NOT NULL DEFAULT 0");
+addColumn("batch_items", "verify_state", "TEXT");
+
 /**
  * Attachment presence, per message.
  *

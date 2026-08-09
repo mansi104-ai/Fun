@@ -1,0 +1,140 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mailwarden — Founding 100</title>
+<meta name="description" content="One payment, lifetime access, only 100 seats. Mailwarden cleans your Gmail sender by sender and can never permanently delete anything." />
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
+<meta name="theme-color" content="#0b0b0b" />
+<style>
+  :root {
+    --bg:#fbfbfa; --surface:#fff; --raised:#f4f3f0; --border:#e6e4e0;
+    --text:#1a1917; --muted:#6b6862; --accent:#2f5d50; --accent-fg:#fff;
+    --accent-soft:#e8f0ec; --radius:14px;
+    --brand-tile:#141311; --brand-ink:#ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#151412; --surface:#1e1d1a; --raised:#26241f; --border:#33312d;
+      --text:#f0eeea; --muted:#9c988f; --accent:#6fae9b; --accent-fg:#10201b;
+      --accent-soft:#22322c; --brand-tile:#f0eeea; --brand-ink:#141311;
+    }
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:760px; margin:0 auto; padding:56px 24px 96px; }
+  .brand { display:flex; width:fit-content; align-items:center; gap:12px;
+           color:var(--text); text-decoration:none; margin-bottom:34px; }
+  .brand-tile { display:grid; place-items:center; width:40px; height:40px;
+                border-radius:11px; background:var(--brand-tile); color:var(--brand-ink); }
+  .brand-tile svg { width:30px; height:30px; display:block; }
+  .brand-word { font-weight:660; font-size:1.25rem; letter-spacing:-0.02em; }
+  h1 { font-size:clamp(1.9rem,5vw,2.6rem); line-height:1.15; letter-spacing:-0.022em; margin:0 0 14px; }
+  .lede { font-size:1.12rem; color:var(--muted); margin:0 0 34px; }
+  .card { background:var(--surface); border:1px solid var(--border);
+          border-radius:var(--radius); padding:26px; margin-bottom:16px; }
+  .card.hero { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .price { font-size:2.6rem; font-weight:760; letter-spacing:-0.035em; line-height:1; }
+  .price small { font-size:.95rem; font-weight:500; color:var(--muted); letter-spacing:0; }
+  .seats { display:inline-block; font-size:.8rem; padding:4px 11px; border-radius:999px;
+           background:var(--accent-soft); color:var(--accent); font-weight:640; margin-bottom:14px; }
+  ul { padding-left:20px; margin:16px 0 0; }
+  li { margin-bottom:7px; }
+  .btn { display:inline-block; width:100%; text-align:center; background:var(--accent);
+         color:var(--accent-fg); padding:15px 24px; border-radius:12px; border:0;
+         font:inherit; font-weight:650; font-size:1.02rem; cursor:pointer; margin-top:20px; }
+  .btn:hover:not(:disabled) { opacity:.9; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .btn.ghost { background:none; color:var(--accent); border:1px solid var(--border); }
+  .muted { color:var(--muted); font-size:.92rem; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:620px) { .row { grid-template-columns:1fr; } }
+  input, textarea {
+    font:inherit; width:100%; padding:13px 15px; border-radius:11px;
+    border:1px solid var(--border); background:var(--bg); color:var(--text);
+  }
+  .note { border-left:3px solid var(--accent); background:var(--accent-soft);
+          padding:14px 16px; border-radius:9px; font-size:.93rem; margin:22px 0; }
+  h2 { font-size:1.1rem; margin:38px 0 12px; letter-spacing:-0.01em; }
+  .hidden { display:none !important; }
+</style>
+
+<main class="wrap">
+  <a class="brand" href="/" aria-label="Mailwarden home">
+    <span class="brand-tile" aria-hidden="true">
+      <svg viewBox="0 0 100 100" fill="none">
+        <rect x="18" y="30" width="64" height="44" rx="8" stroke="currentColor" stroke-width="8"/>
+        <path d="M22 34l24 18a5 5 0 0 0 8 0l24-18" stroke="currentColor" stroke-width="8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    <span class="brand-word">Mailwarden</span>
+  </a>
+
+  <h1>Founding 100</h1>
+  <p class="lede">
+    One payment. Lifetime access. Only 100 seats exist — and that is not a
+    marketing number.
+  </p>
+
+  <div class="card hero">
+    <div class="seats" id="seats">Checking availability…</div>
+    <div class="price">$49 <small>once — not per year</small></div>
+    <ul>
+      <li>Unlimited cleanups, forever</li>
+      <li>Higher-accuracy sorting (Claude instead of the free model)</li>
+      <li>Scheduled re-scans, so your inbox stays clean without you</li>
+      <li>Unsubscribe, with verification that the sender actually honoured it</li>
+      <li>Up to 5 Gmail accounts</li>
+      <li>Every future feature, at no extra cost</li>
+    </ul>
+    <button class="btn" id="buyFounding">Claim a founding seat</button>
+    <p class="muted" style="margin:12px 0 0; text-align:center">
+      Secure checkout by Stripe. We never see your card.
+    </p>
+  </div>
+
+  <!-- Why 100 is a real number, not scarcity theatre. This paragraph is the
+       most persuasive thing on the page precisely because it is a limitation
+       being admitted rather than a benefit being claimed. -->
+  <div class="note">
+    <b>Why only 100?</b> Google caps unverified apps at 100 users while its
+    review runs. That review is what the founding seats pay for. So the limit is
+    imposed on us, not invented for you — and when it lifts, the price goes up
+    and the lifetime deal ends.
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <div class="price" style="font-size:1.8rem">$19 <small>/ year</small></div>
+      <p class="muted" style="margin:8px 0 0">Starter — unlimited cleanups, better sorting.</p>
+      <button class="btn ghost" data-price="starter">Choose Starter</button>
+    </div>
+    <div class="card">
+      <div class="price" style="font-size:1.8rem">$39 <small>/ year</small></div>
+      <p class="muted" style="margin:8px 0 0">Pro — adds scheduled re-scans and 5 accounts.</p>
+      <button class="btn ghost" data-price="pro">Choose Pro</button>
+    </div>
+  </div>
+
+  <h2>Not able to sign in yet?</h2>
+  <p class="muted" style="margin-top:0">
+    If all 100 seats are taken, leave your address and you get first refusal as
+    soon as one opens or verification clears.
+  </p>
+  <form class="card" id="waitForm" style="margin-top:12px">
+    <input type="email" id="waitEmail" placeholder="you@gmail.com" required autocomplete="email" />
+    <button class="btn" type="submit" style="margin-top:12px">Request access</button>
+    <p class="muted" id="waitMsg" style="margin:12px 0 0"></p>
+  </form>
+
+  <p class="muted" style="margin-top:30px">
+    Mailwarden can never permanently delete anything — Google does not grant us
+    that ability. Everything is reversible for 30 days.
+    <a href="/">Back to the overview</a>.
+  </p>
+</main>
+
+<script type="module" src="/pricing.js"></script>
