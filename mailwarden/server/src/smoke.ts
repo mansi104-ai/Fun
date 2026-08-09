@@ -516,6 +516,17 @@ check("heldMessages accounts for the gap exactly",
   promoCat.heldMessages === promoCat.totalMessages - promoCat.cleanableMessages);
 check("Empty categories are present at zero", byId.get("travel")?.totalMessages === 0);
 
+/**
+ * Every held-back line must carry a number, or the safety summary shows a
+ * total that visibly fails to add up from the reasons beneath it. A guard code
+ * missing from HELD_LABEL falls through to un-aggregated per-sender wording,
+ * which has no count. That shipped once.
+ */
+check("Every held-back reason is quantified", (() => {
+  const reasons = cats.flatMap((c) => c.heldReasons);
+  return reasons.length > 0 && reasons.every((r) => /\d/.test(r));
+})(), `${cats.flatMap((c) => c.heldReasons).filter((r) => !/\d/.test(r)).join(" | ")}`);
+
 // Scope integrity: the client can narrow a category but never widen it.
 check("No narrowing returns the whole actionable set",
   senderKeysForCategory(catAcct, "promotional")?.length === 1);

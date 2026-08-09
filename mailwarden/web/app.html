@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#0a0a0a" />
 <link rel="stylesheet" href="/brand.css" />
 <style>
-  .wrap { max-width:960px; margin:0 auto; padding:20px clamp(14px,4vw,20px) 150px; }
+  .wrap { max-width:820px; margin:0 auto; padding:20px clamp(14px,4vw,20px) 150px; }
   header {
     display:flex; align-items:center; justify-content:space-between;
     margin-bottom:32px; gap:12px; flex-wrap:wrap;
@@ -54,7 +54,7 @@
   }
   .tile:hover:not(:disabled) { border-color:var(--accent); transform:translateY(-2px); background:var(--surface); }
   .tile:disabled { cursor:default; opacity:.5; }
-  .tile .icon { font-size:1.7rem; line-height:1; margin-bottom:12px; }
+  .tile .icon { font-size:1.3rem; line-height:1; margin-bottom:10px; filter:grayscale(1); opacity:.5; }
   .tile .title { font-weight:650; letter-spacing:-0.01em; margin-bottom:5px; }
   .tile .blurb { font-size:.87rem; color:var(--muted); flex:1; }
   .tile .count { margin-top:14px; font-weight:700; font-size:1.22rem; letter-spacing:-0.02em; }
@@ -77,13 +77,13 @@
 
   .cat-panel {
     background:var(--surface); border:1px solid var(--border);
-    border-radius:var(--radius); padding:22px; margin-bottom:30px;
+    border-radius:var(--radius); padding:clamp(18px,4vw,24px); margin-bottom:26px;
   }
   .cat-head { display:flex; gap:14px; align-items:flex-start; }
-  .cat-head .icon { font-size:2rem; line-height:1.1; }
+  .cat-head .icon { font-size:1.35rem; line-height:1.2; filter:grayscale(1); opacity:.55; }
   .cat-head h2 { margin:0 0 3px; font-size:1.18rem; letter-spacing:-0.015em; }
   .cat-head p { margin:0; color:var(--muted); font-size:.9rem; }
-  .cat-num { font-size:clamp(1.9rem,6vw,2.6rem); font-weight:750; letter-spacing:-0.035em; margin:16px 0 2px; }
+  .cat-num { font-size:clamp(1.55rem,4.5vw,2rem); font-weight:640; letter-spacing:-0.025em; margin:18px 0 2px; }
   .cat-sub { color:var(--muted); font-size:.92rem; }
   .cat-actions { display:flex; gap:9px; flex-wrap:wrap; margin-top:18px; }
   @media (max-width:560px) {
@@ -126,7 +126,7 @@
     background:var(--surface); border:none; border-radius:0; padding:14px 17px;
   }
   .cat-row:hover:not(:disabled) { background:var(--raised); }
-  .cat-row .ic { font-size:1.25rem; flex-shrink:0; }
+  .cat-row .ic { font-size:1.05rem; flex-shrink:0; filter:grayscale(1); opacity:.5; }
   .cat-row .lb { flex:1; min-width:0; font-weight:580; }
   .cat-row .lb small { display:block; font-weight:400; color:var(--muted); font-size:.81rem; }
   .cat-row .rt { text-align:right; flex-shrink:0; font-variant-numeric:tabular-nums; }
@@ -165,13 +165,13 @@
     background:var(--raised); border-radius:var(--radius);
   }
   .stat .n { font-variant-numeric:tabular-nums; }
-  .stat .n { font-size:1.35rem; font-weight:700; letter-spacing:-0.02em; }
+  .stat .n { font-size:1.2rem; font-weight:620; letter-spacing:-0.015em; }
   .stat .l { font-size:.8rem; color:var(--muted); }
 
   /* ── Job screen ─────────────────────────────────────────────────────── */
   .job-hero { text-align:center; padding:26px 0 8px; }
   .job-hero .icon { font-size:3rem; }
-  .job-num { font-size:clamp(2.2rem, 8vw, 3.4rem); font-weight:750; letter-spacing:-0.035em; margin:10px 0 2px; }
+  .job-num { font-size:clamp(1.7rem, 5vw, 2.3rem); font-weight:640; letter-spacing:-0.025em; margin:10px 0 2px; }
   .panel {
     background:var(--surface); border:1px solid var(--border);
     border-radius:var(--radius); padding:18px 20px; margin:18px 0;
@@ -179,10 +179,10 @@
   .sender-line { display:flex; justify-content:space-between; gap:12px; padding:7px 0; font-size:.92rem; }
   .sender-line + .sender-line { border-top:1px solid var(--border); }
   .safe-box {
-    border-left:3px solid var(--safe); background:var(--accent-soft);
-    padding:12px 14px; border-radius:8px; margin:14px 0; font-size:.88rem;
+    border-left:2px solid var(--safe); background:var(--raised);
+    padding:12px 14px; border-radius:var(--radius-sm); margin:14px 0; font-size:.88rem;
   }
-  .warn-box { border-left:3px solid var(--warn); background:var(--raised); padding:12px 14px; border-radius:8px; margin:14px 0; font-size:.9rem; }
+  .warn-box { border-left:2px solid var(--warn); background:var(--raised); padding:12px 14px; border-radius:var(--radius-sm); margin:14px 0; font-size:.9rem; }
   .center { text-align:center; }
 
   .bar { height:7px; background:var(--raised); border-radius:999px; overflow:hidden; margin:18px 0; }

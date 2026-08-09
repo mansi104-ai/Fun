@@ -276,12 +276,25 @@ export function computeCategories(accountId: string): CategoryView[] {
  * in a number. Grouping by guard code and summing the counts says the same
  * thing once, accurately.
  */
+/**
+ * Every guard code MUST appear here.
+ *
+ * A missing entry falls through to that guard's own per-sender wording, which
+ * carries no count — so the list renders as "4 from the last 7 days" followed
+ * by a bare "Part of a conversation you replied to", and the numbers visibly
+ * fail to add up to the total shown above them. That shipped, and it makes the
+ * safety summary look broken exactly where it most needs to look precise.
+ */
 const HELD_LABEL: Record<string, (n: string) => string> = {
   TOO_RECENT: (n) => `${n} from the last 7 days — recent mail is more likely to still matter.`,
   PROTECTED_CATEGORY: (n) => `${n} from protected senders — receipts, codes, travel, or bank mail.`,
   REPLIED_SENDER: (n) => `${n} from people you have replied to.`,
   USER_PINNED: (n) => `${n} from senders you pinned as protected.`,
-  LOW_CONFIDENCE: (n) => `${n} we are not confident enough to act on.`,
+  LOW_CONFIDENCE: (n) => `${n} we are not confident enough to sort.`,
+  STARRED: (n) => `${n} you starred.`,
+  IN_REPLIED_THREAD: (n) => `${n} in conversations you replied to.`,
+  HAS_ATTACHMENT: (n) => `${n} carrying attachments.`,
+  GMAIL_IMPORTANT: (n) => `${n} Gmail marked important.`,
 };
 
 function summariseHeld(exclusions: { code: string; messageCount: number; reason: string }[]): string[] {
