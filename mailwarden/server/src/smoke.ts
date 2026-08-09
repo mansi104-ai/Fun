@@ -24,7 +24,7 @@ import { aggregateSenders } from "./gmail/sync.js";
 import { isPubliclyRoutable, parseTargets } from "./gmail/unsubscribe.js";
 import { newId } from "./lib/crypto.js";
 import { config } from "./config.js";
-import { directPayInfo, FOUNDING_SEATS, foundingSeatsSold, grantManual, isAdmin, requestAccess } from "./lib/billing.js";
+import { FOUNDING_SEATS, foundingSeatsSold, grantManual, isAdmin, requestAccess } from "./lib/billing.js";
 import { canExecuteBatch, entitlementsFor, setPlan } from "./lib/entitlements.js";
 import { DAY_MS, LIMITS } from "./safety/limits.js";
 import { assertExecutable, evaluate, GuardError, type CandidateMessage } from "./safety/policy.js";
@@ -792,9 +792,6 @@ check("…and is recorded in the audit log with its reference", (() => {
 })());
 setPlan(billUser, "free");
 
-check("UPI link is withheld when no payee is configured",
-  config.direct.upiId ? true : directPayInfo(4200).enabled === false);
-
 check("Access requests accept a real address", requestAccess("buyer@example.com", null, "test"));
 check("…and reject a malformed one", !requestAccess("not-an-email", null, "test"));
 check("…and are deduplicated by address", (() => {
@@ -1019,6 +1016,13 @@ const billingSrc = sources.find((s) => path.basename(s.file) === "billing.ts" &&
   s.file.includes("lib"));
 check("Plans change only via a verified webhook — no client-trusted upgrade path",
   billingSrc !== undefined && /constructEvent/.test(billingSrc.text));
+
+// The payee id must never reach a public endpoint. Enforced at the source
+// level because it is a one-line mistake to reintroduce.
+check("UPI payee id is not exposed on any public route", (() => {
+  const routes = sources.find((x) => x.file.endsWith("billing.ts") && x.file.includes("routes"));
+  return routes !== undefined && !/upiId/.test(routes.text);
+})());
 
 // The guard layer is only meaningful if it is the sole path to mutation.
 const executor = sources.find((s) => s.file.endsWith("executor.ts"))!;

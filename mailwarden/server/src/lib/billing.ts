@@ -281,29 +281,6 @@ function grant(s: Stripe.Checkout.Session): { applied: boolean; reason: string }
  * This stops being sensible the moment volume outgrows the 100-seat cap, which
  * is exactly when Stripe's automation starts being worth its fee.
  */
-export interface DirectPayInfo {
-  enabled: boolean;
-  upiId: string;
-  payeeName: string;
-  note: string;
-  /** Pre-filled UPI deep link, so a phone opens straight into the payment. */
-  upiUri: string;
-}
-
-export function directPayInfo(amountInr: number): DirectPayInfo {
-  const { upiId, payeeName, note } = config.direct;
-  if (!upiId) {
-    return { enabled: false, upiId: "", payeeName, note, upiUri: "" };
-  }
-  const params = new URLSearchParams({
-    pa: upiId,
-    pn: payeeName,
-    am: String(amountInr),
-    cu: "INR",
-    tn: note || "Mailwarden Founding 100",
-  });
-  return { enabled: true, upiId, payeeName, note, upiUri: `upi://pay?${params}` };
-}
 
 export function isAdmin(email: string | undefined): boolean {
   // An unset ADMIN_EMAIL must mean "nobody", never "everybody".

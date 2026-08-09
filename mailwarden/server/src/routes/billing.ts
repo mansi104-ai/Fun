@@ -12,12 +12,12 @@ import {
   requestAccess,
   SoldOutError,
   verifyWebhook,
-  directPayInfo,
   grantManual,
   isAdmin,
   type PriceId,
 } from "../lib/billing.js";
 import type { Plan } from "../lib/entitlements.js";
+import { confirmOrder, createUpiOrder, pendingOrders, priceInr, upiConfigured } from "../lib/upi.js";
 import { currentUserId } from "./auth.js";
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
@@ -105,17 +105,81 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
-   * Direct payment details — UPI or bank transfer, which carry no processor
-   * fee. Public, because the whole point is that a buyer can see it before
-   * signing in.
-   *
-   * The INR figure is a display convenience, not an exchange rate: keep
-   * DIRECT_PAY_INR in step with the dollar price, or charge in INR outright.
+   * Public: only whether UPI is available and what it costs. Deliberately NOT
+   * the payee id — that is returned solely to a signed-in buyer with an order.
+   * A UPI id on a public page gets scraped and gets used to impersonate you,
+   * and it tells a passer-by nothing they need in order to decide.
    */
-  app.get("/api/billing/direct", async () => {
-    const inr = Number(process.env.DIRECT_PAY_INR ?? "4200");
-    return { ...directPayInfo(inr), amountInr: inr };
+  app.get("/api/billing/upi", async () => ({
+    available: upiConfigured(),
+    amountInr: priceInr("founding"),
+  }));
+
+  /**
+   * Creates (or reuses) a UPI order and returns the QR and deep link.
+   *
+   * Requires sign-in for two reasons: the payee id must not be public, and the
+   * order has to be attached to an account so confirming it grants the right
+   * person.
+   */
+  app.post<{ Body: { plan?: string } }>("/api/billing/upi/order", async (req, reply) => {
+    const userId = currentUserId(req.cookies);
+    if (!userId) return reply.code(401).send({ error: "not_authenticated" });
+    if (!upiConfigured()) return reply.code(503).send({ error: "upi_unavailable" });
+
+    const plan = (req.body?.plan ?? "founding") as Plan;
+    if (!["founding", "starter", "pro"].includes(plan)) {
+      return reply.code(400).send({ error: "invalid_plan" });
+    }
+
+    const user = db.prepare(`SELECT email FROM users WHERE id = ?`).get(userId) as
+      | { email: string }
+      | undefined;
+    if (!user) return reply.code(404).send({ error: "no_user" });
+
+    try {
+      return await createUpiOrder(userId, user.email, plan);
+    } catch (err) {
+      return reply
+        .code(409)
+        .send({ error: "order_failed", message: err instanceof Error ? err.message : "Failed." });
+    }
   });
+
+  /** The operator's reconciliation queue: who has paid what, and against which reference. */
+  app.get("/api/billing/upi/orders", async (req, reply) => {
+    const userId = currentUserId(req.cookies);
+    if (!userId) return reply.code(401).send({ error: "not_authenticated" });
+    const me = db.prepare(`SELECT email FROM users WHERE id = ?`).get(userId) as
+      | { email: string }
+      | undefined;
+    if (!isAdmin(me?.email)) return reply.code(403).send({ error: "forbidden" });
+    return { orders: pendingOrders() };
+  });
+
+  /** Confirms one order after the money has been seen in the bank. */
+  app.post<{ Body: { reference?: string; utr?: string } }>(
+    "/api/billing/upi/confirm",
+    async (req, reply) => {
+      const userId = currentUserId(req.cookies);
+      if (!userId) return reply.code(401).send({ error: "not_authenticated" });
+      const me = db.prepare(`SELECT email FROM users WHERE id = ?`).get(userId) as
+        | { email: string }
+        | undefined;
+      if (!isAdmin(me?.email)) return reply.code(403).send({ error: "forbidden" });
+
+      const { reference, utr = "" } = req.body ?? {};
+      if (typeof reference !== "string" || !reference.trim()) {
+        return reply.code(400).send({ error: "missing_reference" });
+      }
+
+      const result = confirmOrder(userId, reference, String(utr));
+      if (!result.ok) {
+        return reply.code(409).send({ error: "confirm_failed", message: result.reason });
+      }
+      return result;
+    },
+  );
 
   /**
    * Grant a plan by hand, after confirming payment arrived.

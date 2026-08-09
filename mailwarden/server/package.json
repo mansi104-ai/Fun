@@ -19,11 +19,13 @@
     "fastify": "^5.2.1",
     "google-auth-library": "^9.15.0",
     "googleapis": "^144.0.0",
+    "qrcode": "^1.5.4",
     "stripe": "^17.5.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.5",
+    "@types/qrcode": "^1.5.6",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

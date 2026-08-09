@@ -81,50 +81,47 @@
 
   <div class="card hero">
     <div class="seats" id="seats">Checking availability…</div>
-    <div class="price">$49 <small>once — not per year</small></div>
+    <div class="price" id="heroPrice">₹799 <small>once — not per year</small></div>
     <ul>
       <li>Unlimited cleanups, forever</li>
-      <li>Higher-accuracy sorting (Claude instead of the free model)</li>
+      <li>Higher-accuracy sorting</li>
       <li>Scheduled re-scans, so your inbox stays clean without you</li>
       <li>Unsubscribe, with verification that the sender actually honoured it</li>
       <li>Up to 5 Gmail accounts</li>
       <li>Every future feature, at no extra cost</li>
     </ul>
-    <button class="btn" id="buyFounding">Claim a founding seat</button>
-    <p class="muted" style="margin:12px 0 0; text-align:center">
-      Secure checkout by Stripe. We never see your card.
-    </p>
-  </div>
 
-  <!-- Direct payment. Hidden entirely unless a UPI id is configured, so the
-       page never advertises a channel that does not work. -->
-  <div class="card hidden" id="directCard">
-    <h2 style="margin:0 0 6px">Paying from India? Use UPI</h2>
-    <p class="muted" style="margin:0 0 14px">
-      UPI carries no processing fee, so every rupee reaches the product instead
-      of a card network. We confirm it by hand — usually within a few hours.
-    </p>
-    <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap">
-      <div>
-        <div class="muted">Pay</div>
-        <div style="font-size:1.6rem; font-weight:720" id="directAmount"></div>
-      </div>
-      <div style="flex:1; min-width:200px">
-        <div class="muted">to</div>
-        <div style="font-family:ui-monospace,monospace; font-size:1.05rem" id="directUpi"></div>
-      </div>
+    <div id="upiStep1">
+      <button class="btn" id="upiStart">Pay with UPI</button>
+      <p class="muted" style="margin:12px 0 0; text-align:center">
+        No card fee — the whole amount goes into building this.
+        You will sign in with Google first, so we know which inbox the seat is for.
+      </p>
     </div>
-    <a class="btn" id="directPay" href="#">Open UPI app</a>
-    <p class="muted" style="margin:12px 0 0">
-      After paying, sign in with the Gmail address you want cleaned and email us
-      the UPI reference. Your seat is activated manually — which is also when we
-      add you to Google's tester list, so it is the same step either way.
+
+    <div id="upiStep2" hidden style="text-align:center; margin-top:20px">
+      <img id="upiQr" alt="UPI payment QR code" width="230" height="230"
+           style="border-radius:12px; background:#fff; padding:10px" />
+      <div style="margin:14px 0 2px"><span class="muted">Pay</span>
+        <b style="font-size:1.4rem" id="upiAmount"></b></div>
+      <div class="muted">Reference — keep this in the payment note</div>
+      <div id="upiRef" style="font-family:ui-monospace,monospace; font-size:1.5rem;
+           font-weight:700; letter-spacing:.06em; margin:2px 0 14px"></div>
+      <a class="btn" id="upiOpen" href="#">Open my UPI app</a>
+      <p class="muted" style="margin:14px 0 0">
+        Scan from another phone, or tap the button on this one. Your seat is
+        activated as soon as we see the payment — usually within a few hours.
+      </p>
+    </div>
+
+    <p class="muted hidden" id="upiUnavailable" style="margin:16px 0 0; text-align:center">
+      Payments are opening shortly — leave your address below and you get first refusal.
     </p>
   </div>
 
-  <!-- Why 100 is a real number, not scarcity theatre. This paragraph is the
-       most persuasive thing on the page precisely because it is a limitation
-       being admitted rather than a benefit being claimed. -->
+  <!-- Why 100 is a real number, not scarcity theatre. This is the most
+       persuasive paragraph on the page precisely because it admits a
+       limitation rather than claiming a benefit. -->
   <div class="note">
     <b>Why only 100?</b> Google caps unverified apps at 100 users while its
     review runs. That review is what the founding seats pay for. So the limit is
@@ -132,17 +129,16 @@
     and the lifetime deal ends.
   </div>
 
-  <div class="row">
-    <div class="card">
-      <div class="price" style="font-size:1.8rem">$19 <small>/ year</small></div>
-      <p class="muted" style="margin:8px 0 0">Starter — unlimited cleanups, better sorting.</p>
-      <button class="btn ghost" data-price="starter">Choose Starter</button>
-    </div>
-    <div class="card">
-      <div class="price" style="font-size:1.8rem">$39 <small>/ year</small></div>
-      <p class="muted" style="margin:8px 0 0">Pro — adds scheduled re-scans and 5 accounts.</p>
-      <button class="btn ghost" data-price="pro">Choose Pro</button>
-    </div>
+  <!-- Stated plainly rather than discovered at the payment step. UPI settles
+       through Indian banks only; a foreign card cannot pay it at all. -->
+  <div class="card" id="intlCard">
+    <h2 style="margin:0 0 6px">Paying from outside India?</h2>
+    <p class="muted" style="margin:0">
+      UPI only works with Indian banks, so it cannot take an international card.
+      Card checkout is <span id="intlState">not open yet</span> — leave your
+      address below and we will write to you the moment it is.
+    </p>
+    <button class="btn ghost hidden" id="buyFounding">Pay by card</button>
   </div>
 
   <h2>Not able to sign in yet?</h2>

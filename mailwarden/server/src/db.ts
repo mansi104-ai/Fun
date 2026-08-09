@@ -186,6 +186,27 @@ CREATE TABLE IF NOT EXISTS access_requests (
   created_at  INTEGER NOT NULL
 );
 
+-- One row per UPI payment attempt.
+--
+-- The reference is what makes manual reconciliation tractable: it goes in the
+-- UPI transaction note, so a bank statement line can be matched to a buyer
+-- without guessing from name or amount. Without it, ten people paying ₹799 on
+-- the same evening are indistinguishable.
+CREATE TABLE IF NOT EXISTS payment_orders (
+  id           TEXT PRIMARY KEY,
+  reference    TEXT NOT NULL UNIQUE,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email        TEXT NOT NULL,
+  plan         TEXT NOT NULL,
+  amount_inr   INTEGER NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'pending',  -- pending | confirmed | cancelled
+  utr          TEXT,                             -- the bank's transaction id
+  created_at   INTEGER NOT NULL,
+  confirmed_at INTEGER,
+  confirmed_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON payment_orders(status, created_at DESC);
+
 -- Every Stripe event we accept, so a replayed or duplicated webhook cannot
 -- grant a second seat or double-count revenue. Stripe explicitly does not
 -- guarantee exactly-once delivery.
