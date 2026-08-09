@@ -581,6 +581,9 @@ function renderSenders() {
       renderSenders(); renderTray();
     };
   }
+  for (const el of document.querySelectorAll("[data-read]")) {
+    el.onclick = () => openReader(el.dataset.key);
+  }
   for (const el of document.querySelectorAll("[data-pin]")) {
     el.onclick = async () => {
       const { key, pin } = el.dataset;
@@ -602,10 +605,15 @@ function cardHtml(s) {
   const release = s.protected && s.userProtected !== 1 && s.category !== "personal"
     ? `<button data-key="${s.senderKey}" data-pin="release">Let me act on this</button>` : "";
 
+  // Reading is always offered, including for protected senders: seeing what a
+  // sender actually sends is how you judge whether the lock is right.
+  const read = `<button data-key="${esc(s.senderKey)}" data-read="1">Read mail</button>`;
+
   const controls = s.protected
     ? `<span class="lock-note">Locked — nothing here will be touched in bulk.</span>
-       <div class="actions" style="margin-top:8px">${release}${pin}</div>`
+       <div class="actions" style="margin-top:8px">${read}${release}${pin}</div>`
     : `<div class="actions">
+         ${read}
          <button data-key="${s.senderKey}" data-act="keep">Keep</button>
          <button data-key="${s.senderKey}" data-act="archive">Archive all ${fmt.format(s.messageCount)}</button>
          <button data-key="${s.senderKey}" data-act="trash" class="danger">Trash all ${fmt.format(s.messageCount)}</button>
@@ -676,6 +684,67 @@ $("confirmBtn").onclick = async () => {
     alert(err.status === 402 ? err.data.message : `Something went wrong: ${err.message}`);
   }
 };
+
+// ── Reading mail ─────────────────────────────────────────────────────
+//
+// Content is fetched live and never stored — not by the server, and not here
+// beyond the open dialog. Closing the reader discards it.
+
+let readerSender = null;
+
+async function openReader(senderKey) {
+  readerSender = senderKey;
+  $("readerTitle").textContent = senderKey;
+  $("readerBody").innerHTML = `<p class="excl">Loading…</p>`;
+  $("readerDialog").showModal();
+  try {
+    const { messages } = await api(`/api/senders/${encodeURIComponent(senderKey)}/messages?limit=20`);
+    if (messages.length === 0) {
+      $("readerBody").innerHTML = `<p class="excl">No messages found for this sender.</p>`;
+      return;
+    }
+    renderMessageList(messages);
+  } catch (err) {
+    $("readerBody").innerHTML = `<p class="excl">Could not load: ${esc(err.message)}</p>`;
+  }
+}
+
+function renderMessageList(messages) {
+  $("readerBody").innerHTML = `
+    <p class="excl" style="margin-top:0">
+      Fetched from Gmail just now. Nothing here is saved to Mailwarden.
+    </p>
+    <div class="msg-list">${messages.map((m) => `
+      <button class="msg" data-msg="${esc(m.messageId)}">
+        <span class="msg-sub">${m.unread ? "<b>●</b> " : ""}${esc(m.subject)}</span>
+        <span class="msg-meta">${new Date(m.date).toLocaleDateString()} · ${mb(m.sizeBytes)}</span>
+        <span class="msg-snip">${esc(m.snippet.slice(0, 140))}</span>
+      </button>`).join("")}</div>`;
+
+  for (const el of document.querySelectorAll("[data-msg]")) {
+    el.onclick = () => openMessage(el.dataset.msg);
+  }
+}
+
+async function openMessage(id) {
+  $("readerBody").innerHTML = `<p class="excl">Loading message…</p>`;
+  try {
+    const m = await api(`/api/messages/${encodeURIComponent(id)}`);
+    $("readerBody").innerHTML = `
+      <button class="link-btn" id="backToList">← All messages from this sender</button>
+      <h3 style="margin:12px 0 4px; font-size:1.05rem">${esc(m.subject)}</h3>
+      <div class="excl" style="margin-bottom:12px">
+        ${esc(m.from)} · ${new Date(m.date).toLocaleString()}
+        ${m.convertedFromHtml ? " · shown as plain text" : ""}
+      </div>
+      <pre class="msg-body">${esc(m.text)}</pre>`;
+    $("backToList").onclick = () => openReader(readerSender);
+  } catch (err) {
+    $("readerBody").innerHTML = `<p class="excl">Could not open: ${esc(err.message)}</p>`;
+  }
+}
+
+$("closeReader").onclick = () => $("readerDialog").close();
 
 // ── Boot ─────────────────────────────────────────────────────────────
 (async () => {

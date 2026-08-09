@@ -187,6 +187,33 @@
   .tray-inner { max-width:900px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; }
 
   dialog { border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); color:var(--text); padding:24px; max-width:520px; width:calc(100% - 36px); }
+
+  /* ── Reader ─────────────────────────────────────────────────────────── */
+  dialog.reader { max-width:760px; max-height:86vh; display:flex; flex-direction:column; padding:0; }
+  dialog.reader[open] { display:flex; }
+  .reader-head {
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:16px 20px; border-bottom:1px solid var(--border); position:sticky; top:0;
+    background:var(--surface); border-radius:var(--radius) var(--radius) 0 0;
+  }
+  .reader-head strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.95rem; }
+  #readerBody { padding:18px 20px 24px; overflow-y:auto; }
+  .msg-list { display:flex; flex-direction:column; }
+  .msg {
+    display:block; width:100%; text-align:left; border:none; border-radius:0;
+    border-top:1px solid var(--border); background:none; padding:11px 4px;
+  }
+  .msg:hover { background:var(--raised); }
+  .msg-sub { display:block; font-weight:580; font-size:.92rem; }
+  .msg-meta { display:block; color:var(--muted); font-size:.79rem; margin:2px 0 3px; }
+  .msg-snip { display:block; color:var(--muted); font-size:.83rem; }
+  /* pre-wrap, not a rendered document: message HTML is converted to text
+     server-side, so there is nothing here that can execute or phone home. */
+  .msg-body {
+    white-space:pre-wrap; word-break:break-word; font:inherit; font-size:.9rem;
+    line-height:1.6; margin:0; background:var(--raised); padding:14px;
+    border-radius:10px; max-height:52vh; overflow-y:auto;
+  }
   dialog::backdrop { background:rgba(0,0,0,.45); }
   .excl { font-size:.86rem; color:var(--muted); margin:5px 0; }
   .excl b { color:var(--safe); font-weight:600; }
@@ -309,6 +336,14 @@
     <button id="cancelConfirm">Cancel</button>
     <button class="primary" id="reallyConfirm">Confirm</button>
   </div>
+</dialog>
+
+<dialog id="readerDialog" class="reader">
+  <div class="reader-head">
+    <strong id="readerTitle"></strong>
+    <button id="closeReader">Close</button>
+  </div>
+  <div id="readerBody"></div>
 </dialog>
 
 <div class="tray hidden" id="tray">

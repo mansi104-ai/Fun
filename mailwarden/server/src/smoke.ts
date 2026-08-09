@@ -22,7 +22,7 @@ import { db } from "./db.js";
 import { planBatch } from "./gmail/executor.js";
 import { aggregateSenders } from "./gmail/sync.js";
 import { newId } from "./lib/crypto.js";
-import { canExecuteBatch } from "./lib/entitlements.js";
+import { canExecuteBatch, entitlementsFor } from "./lib/entitlements.js";
 import { DAY_MS, LIMITS } from "./safety/limits.js";
 import { assertExecutable, evaluate, GuardError, type CandidateMessage } from "./safety/policy.js";
 
@@ -349,9 +349,33 @@ section("11. Entitlement gate");
 // one-click recipe — paywalling before the first job completes is the
 // competitor failure documented in docs/00 §2a.
 check("Free plan allows the first cleanup", canExecuteBatch(userId).allowed);
-db.prepare(`UPDATE users SET free_batch_used = 1 WHERE id = ?`).run(userId);
+
+/**
+ * The free limit is currently overridden to unlimited for pre-launch use, so
+ * this asserts the GATE, not the number: exceeding whatever limit is configured
+ * must block and must ask for an upgrade.
+ *
+ * The override is surfaced as its own check rather than silently accommodated —
+ * a disabled paywall that nobody is reminded about is a disabled paywall that
+ * ships.
+ */
+const freeLimit = entitlementsFor(userId).freeBatches;
+const unlimited = freeLimit > 1_000;
+check(
+  unlimited
+    ? "NOTE: free tier is temporarily UNLIMITED — restore freeBatches to 1 once Stripe exists"
+    : `Free tier is metered at ${freeLimit} batch(es)`,
+  true,
+);
+
+db.prepare(`UPDATE users SET free_batch_used = ? WHERE id = ?`).run(
+  unlimited ? Number.MAX_SAFE_INTEGER : 1,
+  userId,
+);
 const exhausted = canExecuteBatch(userId);
-check("Free plan blocks the second cleanup", !exhausted.allowed && exhausted.upgradeRequired === true);
+check("Exceeding the free limit blocks, and asks for an upgrade",
+  !exhausted.allowed && exhausted.upgradeRequired === true);
+
 db.prepare(`UPDATE users SET plan = 'starter' WHERE id = ?`).run(userId);
 check("Paid plan is unrestricted", canExecuteBatch(userId).allowed);
 
@@ -738,6 +762,37 @@ const indexTs = sources.find(
 check("index.ts was located for the CSP check", indexTs !== undefined);
 check("CSP does not allow 'unsafe-inline' scripts",
   indexTs !== undefined && !/script-src[^;]*unsafe-inline/.test(indexTs.text));
+
+/**
+ * Reading mail is allowed; retaining it is not.
+ *
+ * The product claim is now "we never store your message content, and we only
+ * read the one you asked to see". That is only true if reader.ts writes
+ * nothing, so the promise is enforced here rather than trusted.
+ */
+const reader = sources.find((s) => path.basename(s.file) === "reader.ts");
+check("reader.ts exists", reader !== undefined);
+if (reader) {
+  check("Reader never writes to the database",
+    !/\b(INSERT|UPDATE|DELETE)\b/i.test(reader.text));
+  check("Reader never logs message content", !/console\.(log|info|warn)/.test(reader.text));
+  check("Reader checks ownership before fetching", reader.text.includes("ownsMessage"));
+}
+
+// Message content must never reach a model. Classification runs on aggregate
+// sender statistics; if llm.ts ever imports the reader, that has changed.
+const llm = sources.find((s) => path.basename(s.file) === "llm.ts");
+check("Classifier does not import the message reader",
+  llm !== undefined && !/from\s+["'].*reader\.js["']/.test(llm.text));
+
+// The database schema must not gain a column that could hold a body or a
+// plaintext subject — the data-minimisation claim in docs/03 rests on it.
+const dbTs = sources.find((s) => path.basename(s.file) === "db.ts")!;
+check("Schema stores no message body or plaintext subject",
+  !/\b(body|snippet|plain_text|subject)\s+TEXT/i.test(dbTs.text) ||
+    /subject_hash\s+TEXT/.test(dbTs.text));
+check("Schema still stores subject_hash, not subject",
+  /subject_hash/.test(dbTs.text) && !/\bsubject\s+TEXT/i.test(dbTs.text));
 
 // The guard layer is only meaningful if it is the sole path to mutation.
 const executor = sources.find((s) => s.file.endsWith("executor.ts"))!;

@@ -3,6 +3,7 @@ import { audit, db } from "../db.js";
 import { classifyAccount, isSuggestable } from "../classify/index.js";
 import { ReconnectRequired } from "../gmail/client.js";
 import { executeBatch, planBatch, undoBatch, type BatchAction } from "../gmail/executor.js";
+import { listSenderMessages, readMessage } from "../gmail/reader.js";
 import { runSync, syncProgress } from "../gmail/sync.js";
 import {
   canExecuteBatch,
@@ -183,6 +184,69 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
         suggested: isSuggestable(r.category as string | null, r.confidence as number | null),
       })),
     };
+  });
+
+  // ── Reading mail ───────────────────────────────────────────────────────
+
+  /**
+   * Recent messages from one sender, with real subjects.
+   *
+   * Subjects come from Gmail, not from our database, which stores only a salted
+   * hash of each. Nothing fetched here is persisted.
+   */
+  app.get<{ Params: { key: string }; Querystring: { limit?: string } }>(
+    "/api/senders/:key/messages",
+    async (req, reply) => {
+      const ctx = requireAccount(req, reply);
+      if (!ctx) return;
+
+      const senderKey = decodeURIComponent(req.params.key);
+      const known = db
+        .prepare(`SELECT 1 AS ok FROM senders WHERE account_id = ? AND sender_key = ?`)
+        .get(ctx.accountId, senderKey);
+      if (!known) return reply.code(404).send({ error: "unknown_sender" });
+
+      try {
+        const messages = await listSenderMessages(
+          ctx.accountId,
+          senderKey,
+          Number(req.query.limit ?? 20),
+        );
+        return { senderKey, messages };
+      } catch (err) {
+        if (err instanceof ReconnectRequired) {
+          return reply.code(409).send({ error: "reconnect_required" });
+        }
+        throw err;
+      }
+    },
+  );
+
+  /**
+   * One message's content, fetched live and never stored.
+   *
+   * Audited: reading someone's mail is exactly the kind of access that should
+   * leave a trail the user can inspect, and the audit log is user-visible at
+   * /api/audit. The message id is recorded; the content is not.
+   */
+  app.get<{ Params: { id: string } }>("/api/messages/:id", async (req, reply) => {
+    const ctx = requireAccount(req, reply);
+    if (!ctx) return;
+
+    try {
+      const message = await readMessage(ctx.accountId, req.params.id);
+      // Null means the id is not one of this account's messages. 404, not 403 —
+      // confirming existence would leak whether an id is real.
+      if (!message) return reply.code(404).send({ error: "message_not_found" });
+
+      audit(ctx.userId, "message.read", { messageId: req.params.id });
+      return message;
+    } catch (err) {
+      if (err instanceof ReconnectRequired) {
+        return reply.code(409).send({ error: "reconnect_required" });
+      }
+      throw err;
+    }
   });
 
   // ── Categories: the browse-by-kind layer ───────────────────────────────

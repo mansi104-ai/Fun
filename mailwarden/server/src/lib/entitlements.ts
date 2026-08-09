@@ -34,7 +34,19 @@ export interface Entitlements {
 const PLANS: Record<Plan, Entitlements> = {
   free: {
     plan: "free",
-    freeBatches: 1,
+    /**
+     * TEMPORARILY UNLIMITED — pre-launch, single operator, no billing wired.
+     *
+     * The intended value is 1: one complete cleanup free, then the paywall.
+     * That number is the whole monetisation model (docs/02 §3), so this is a
+     * setting to restore, not a decision that was reversed.
+     *
+     * RESTORE TO 1 before the first paying user, and note that with Stripe
+     * unbuilt there is currently no upgrade path at all — shipping `1` while
+     * checkout does not exist would hard-block every user after one cleanup.
+     * Order matters: Stripe first (iterations 24–27), then this back to 1.
+     */
+    freeBatches: Number.MAX_SAFE_INTEGER,
     scanLimit: 25_000,
     premiumClassification: false,
     scheduledRescan: false,
