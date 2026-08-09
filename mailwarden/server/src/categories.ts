@@ -1,3 +1,4 @@
+import { candidatesFor } from "./candidates.js";
 import { db } from "./db.js";
 import { CATEGORIES, PROTECTED_CATEGORIES, type Category } from "./classify/taxonomy.js";
 import { evaluate, type CandidateMessage } from "./safety/policy.js";
@@ -175,19 +176,6 @@ function sendersByCategory(accountId: string): Map<Category, SenderRow[]> {
   return out;
 }
 
-function candidatesFor(accountId: string, senderKeys: string[]): CandidateMessage[] {
-  if (senderKeys.length === 0) return [];
-  const placeholders = senderKeys.map(() => "?").join(",");
-  return db
-    .prepare(
-      `SELECT message_id, sender_key, labels, size_bytes, internal_date
-       FROM messages_meta
-       WHERE account_id = ? AND sender_key IN (${placeholders})
-         AND labels NOT LIKE '%TRASH%'`,
-    )
-    .all(accountId, ...senderKeys) as CandidateMessage[];
-}
-
 /**
  * Builds the full category view for an account. Every category in the taxonomy
  * appears in the result, even at zero, so the list does not reshuffle between
@@ -228,7 +216,7 @@ export function computeCategories(accountId: string): CategoryView[] {
       accountId,
       action: "archive",
       senderKeys,
-      candidates: candidatesFor(accountId, senderKeys),
+      candidates: candidatesFor(accountId, senderKeys, "archive"),
       confirmed: true,
     });
 

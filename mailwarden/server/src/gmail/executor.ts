@@ -1,4 +1,5 @@
 import { audit, db, now } from "../db.js";
+import { candidatesFor, labelsAfter } from "../candidates.js";
 import { forgetUserDecisions, recordUserDecisions } from "../classify/index.js";
 import { newId } from "../lib/crypto.js";
 import { withRetry } from "../lib/retry.js";
@@ -13,6 +14,7 @@ import {
   type Violation,
 } from "../safety/policy.js";
 import { gmailFor } from "./client.js";
+import { aggregateSenders } from "./sync.js";
 
 export type BatchAction = "archive" | "trash";
 
@@ -26,19 +28,6 @@ export interface BatchPlan {
   violations: Violation[];
   requiresConfirmation: boolean;
   ok: boolean;
-}
-
-function candidatesFor(accountId: string, senderKeys: string[]): CandidateMessage[] {
-  if (senderKeys.length === 0) return [];
-  const placeholders = senderKeys.map(() => "?").join(",");
-  return db
-    .prepare(
-      `SELECT message_id, sender_key, labels, size_bytes, internal_date
-       FROM messages_meta
-       WHERE account_id = ? AND sender_key IN (${placeholders})
-         AND labels NOT LIKE '%TRASH%'`,
-    )
-    .all(accountId, ...senderKeys) as CandidateMessage[];
 }
 
 /**
@@ -60,7 +49,7 @@ export function planBatch(
 ): BatchPlan {
   if (senderKeys.length === 0) throw new Error("No senders selected.");
 
-  const candidates = candidatesFor(accountId, senderKeys);
+  const candidates = candidatesFor(accountId, senderKeys, action);
   const verdict = evaluate({ accountId, action, senderKeys, candidates, confirmed });
 
   const perSender = new Map<string, number>();
@@ -216,6 +205,8 @@ export async function executeBatch(
         ? { removeLabelIds: ["INBOX"] }
         : { addLabelIds: ["TRASH"], removeLabelIds: ["INBOX"] };
 
+    const priorById = new Map(items.map((i) => [i.message_id, i.prior_labels]));
+
     for (const ids of chunk(pending, LIMITS.gmailBatchModifyLimit)) {
       await withRetry(
         () => gmail.users.messages.batchModify({ userId: "me", requestBody: { ids, ...mod } }),
@@ -226,9 +217,30 @@ export async function executeBatch(
         const mark = db.prepare(
           `UPDATE batch_items SET applied = 1 WHERE batch_id = ? AND message_id = ?`,
         );
-        for (const id of ids) mark.run(batchId, id);
+        // Mirror the change into our own copy of the mailbox.
+        //
+        // Without this the app tells Gmail to move 2,400 messages, Gmail does
+        // it, and every count in the UI is then recomputed from metadata that
+        // still says they are sitting in the inbox — so nothing appears to
+        // happen, and the same messages get offered for the same action again.
+        // Observed in production. The write is inside the same transaction as
+        // the `applied` flag so the two can never disagree.
+        const relabel = db.prepare(
+          `UPDATE messages_meta SET labels = ? WHERE account_id = ? AND message_id = ?`,
+        );
+        for (const id of ids) {
+          mark.run(batchId, id);
+          const prior = priorById.get(id);
+          if (prior !== undefined) {
+            relabel.run(labelsAfter(prior, batch.action), accountId, id);
+          }
+        }
       })();
     }
+
+    // Sender rows are derived from messages_meta, so they need recomputing
+    // before the next read or the per-sender counts stay stale too.
+    aggregateSenders(accountId);
 
     db.prepare(`UPDATE batches SET status = 'done', completed_at = ? WHERE id = ?`).run(
       now(),
@@ -315,6 +327,15 @@ export async function undoBatch(accountId: string, batchId: string): Promise<Und
             }),
           { label: `undo batchModify(${ids.length})` },
         );
+        // Put the local copy back exactly as it was. prior_labels is the
+        // authoritative record of the pre-action state — the same record the
+        // Gmail call above was derived from.
+        db.transaction(() => {
+          const relabel = db.prepare(
+            `UPDATE messages_meta SET labels = ? WHERE account_id = ? AND message_id = ?`,
+          );
+          for (const id of ids) relabel.run(priorLabels, accountId, id);
+        })();
         restored += ids.length;
       } catch (err) {
         // Partial undo is better than none. Report the shortfall rather than
@@ -330,6 +351,7 @@ export async function undoBatch(accountId: string, batchId: string): Promise<Und
       now(),
       batchId,
     );
+    aggregateSenders(accountId);
     // The user reversed this, so unlearn it — see forgetUserDecisions.
     forgetUserDecisions(accountId, [...new Set(items.map((i) => i.sender_key))]);
   } else {

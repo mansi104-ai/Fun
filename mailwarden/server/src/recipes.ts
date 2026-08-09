@@ -1,3 +1,4 @@
+import { candidatesFor } from "./candidates.js";
 import { db } from "./db.js";
 import { evaluate, type CandidateMessage } from "./safety/policy.js";
 import { DAY_MS } from "./safety/limits.js";
@@ -157,19 +158,6 @@ function loadSummaries(accountId: string): SenderSummary[] {
   }));
 }
 
-function candidatesFor(accountId: string, senderKeys: string[]): CandidateMessage[] {
-  if (senderKeys.length === 0) return [];
-  const placeholders = senderKeys.map(() => "?").join(",");
-  return db
-    .prepare(
-      `SELECT message_id, sender_key, labels, size_bytes, internal_date
-       FROM messages_meta
-       WHERE account_id = ? AND sender_key IN (${placeholders})
-         AND labels NOT LIKE '%TRASH%'`,
-    )
-    .all(accountId, ...senderKeys) as CandidateMessage[];
-}
-
 /**
  * Computes every recipe for an account, with counts that have already survived
  * the guardrails. Recipes resolving to nothing are returned with zero counts so
@@ -194,7 +182,7 @@ export function computeRecipes(accountId: string): Recipe[] {
       accountId,
       action: def.action,
       senderKeys,
-      candidates: candidatesFor(accountId, senderKeys),
+      candidates: candidatesFor(accountId, senderKeys, "archive"),
       confirmed: true,
     });
 

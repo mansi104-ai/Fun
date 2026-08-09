@@ -387,7 +387,14 @@ export function aggregateSenders(accountId: string): void {
               MAX(has_unsubscribe)                  AS has_unsubscribe,
               COUNT(DISTINCT subject_hash)          AS distinct_subjects,
               MAX(CASE WHEN labels LIKE '%SENT%' THEN 1 ELSE 0 END) AS replied
-       FROM messages_meta WHERE account_id = ? GROUP BY sender_key`,
+       FROM messages_meta
+       WHERE account_id = ?
+         -- Trashed mail is on its way out of the mailbox; counting it keeps
+         -- every total in the UI at its pre-cleanup value, so a successful
+         -- cleanup looks like it did nothing. Archived mail still counts: it
+         -- remains in All Mail and still occupies the storage quota.
+         AND labels NOT LIKE '%TRASH%'
+       GROUP BY sender_key`,
     )
     .all(accountId) as {
     sender_key: string;
@@ -457,6 +464,18 @@ export function aggregateSenders(accountId: string): void {
   `);
 
   db.transaction(() => {
+    // Zero everything first.
+    //
+    // The aggregation query returns no row at all for a sender whose mail has
+    // been entirely trashed, so an upsert-only pass leaves its previous count
+    // untouched — the sender the user just cleaned out keeps showing its old
+    // total forever. Resetting inside the same transaction means a reader can
+    // never observe the zeroed intermediate state.
+    db.prepare(
+      `UPDATE senders SET message_count = 0, unread_count = 0, total_bytes = 0
+       WHERE account_id = ?`,
+    ).run(accountId);
+
     for (const r of rows) {
       if (self && r.sender_key === self) continue; // never act on your own sent mail
       upsert.run({

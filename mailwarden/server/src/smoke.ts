@@ -13,6 +13,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { candidatesFor, labelsAfter } from "./candidates.js";
 import { computeCategories, senderKeysForCategory } from "./categories.js";
 import { classifyHeuristically, fallbackClassify, type SenderFacts } from "./classify/heuristics.js";
 import { factsHash as factsHashForTest, isSuggestable } from "./classify/index.js";
@@ -503,6 +504,78 @@ check("An unknown category id is rejected",
 
 db.prepare(`DELETE FROM users WHERE id = ?`).run(catUser);
 db.prepare(`DELETE FROM messages_meta WHERE account_id = ?`).run(catAcct);
+
+// ── 13b. Local mailbox state tracks what we told Gmail to do ─────────────
+
+section("13b. Executing a batch updates our own copy of the mailbox");
+
+/**
+ * The bug this pins cost a real user 2,421 messages of confusion: Gmail moved
+ * them, and every count in the UI stayed identical, because messages_meta was
+ * never updated. The same messages were then offered for the same action again.
+ */
+check("Archive drops INBOX", labelsAfter("INBOX,UNREAD,CATEGORY_PROMOTIONS", "archive") === "UNREAD,CATEGORY_PROMOTIONS");
+check("Archive does not add TRASH", !labelsAfter("INBOX,UNREAD", "archive").includes("TRASH"));
+check("Trash drops INBOX and adds TRASH", (() => {
+  const l = labelsAfter("INBOX,UNREAD", "trash").split(",");
+  return !l.includes("INBOX") && l.includes("TRASH");
+})());
+check("Label transform is idempotent",
+  labelsAfter(labelsAfter("INBOX,UNREAD", "trash"), "trash") === labelsAfter("INBOX,UNREAD", "trash"));
+
+const stateAcct = newId("acc");
+const stateUser = newId("usr");
+db.prepare(`INSERT INTO users (id, email, plan, created_at, updated_at) VALUES (?,?,?,?,?)`).run(
+  stateUser, `${stateUser}@test.local`, "free", Date.now(), Date.now(),
+);
+db.prepare(
+  `INSERT INTO accounts (id, user_id, email, refresh_token_enc, created_at) VALUES (?,?,?,?,?)`,
+).run(stateAcct, stateUser, "state@test.local", "x", Date.now());
+db.prepare(
+  `INSERT INTO senders (id, account_id, sender_key, domain, message_count, protected,
+                        user_protected, user_replied, category, confidence)
+   VALUES (?,?,?,?,?,0,0,0,?,?)`,
+).run(newId("snd"), stateAcct, "bulk@shop.com", "shop.com", 20, "promotional", 0.9);
+{
+  const stmt = db.prepare(
+    `INSERT INTO messages_meta (account_id, message_id, sender_key, internal_date, size_bytes, labels)
+     VALUES (?,?,?,?,?,?)`,
+  );
+  for (let i = 0; i < 20; i++) {
+    stmt.run(stateAcct, `sm_${i}`, "bulk@shop.com", OLD, 1000, "INBOX,UNREAD");
+  }
+}
+
+check("Archive candidates are inbox-only",
+  candidatesFor(stateAcct, ["bulk@shop.com"], "archive").length === 20);
+
+// Simulate the post-execute write the executor now performs.
+db.prepare(`UPDATE messages_meta SET labels = ? WHERE account_id = ?`).run("UNREAD", stateAcct);
+
+check("Archived mail is no longer an archive candidate",
+  candidatesFor(stateAcct, ["bulk@shop.com"], "archive").length === 0);
+check("…but is still a trash candidate",
+  candidatesFor(stateAcct, ["bulk@shop.com"], "trash").length === 20);
+
+db.prepare(`UPDATE messages_meta SET labels = ? WHERE account_id = ?`).run("TRASH", stateAcct);
+check("Trashed mail is not a candidate for anything",
+  candidatesFor(stateAcct, ["bulk@shop.com"], "trash").length === 0 &&
+    candidatesFor(stateAcct, ["bulk@shop.com"], "archive").length === 0);
+
+aggregateSenders(stateAcct);
+check("Sender counts exclude trashed mail — the number the user watches",
+  (db.prepare(`SELECT COALESCE(SUM(message_count),0) c FROM senders WHERE account_id = ?`)
+    .get(stateAcct) as { c: number }).c === 0);
+
+// Undo restores prior labels, so the counts must come back.
+db.prepare(`UPDATE messages_meta SET labels = ? WHERE account_id = ?`).run("INBOX,UNREAD", stateAcct);
+aggregateSenders(stateAcct);
+check("Undo restores the counts",
+  (db.prepare(`SELECT COALESCE(SUM(message_count),0) c FROM senders WHERE account_id = ?`)
+    .get(stateAcct) as { c: number }).c === 20);
+
+db.prepare(`DELETE FROM users WHERE id = ?`).run(stateUser);
+db.prepare(`DELETE FROM messages_meta WHERE account_id = ?`).run(stateAcct);
 
 // ── 14. Agent: learning, caching, and degradation ────────────────────────
 
