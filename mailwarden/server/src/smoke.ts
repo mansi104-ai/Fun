@@ -9,7 +9,7 @@
  *
  * Run:  pnpm exec tsx src/smoke.ts
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -628,6 +628,43 @@ for (const [pattern, label] of forbidden) {
   check(`No use of ${label}`, hits.length === 0,
     hits.map((h) => path.basename(h.file)).join(", "));
 }
+
+/**
+ * The CSP forbids inline scripts, so an inline <script> ships an app that
+ * renders perfectly and does nothing.
+ *
+ * This shipped to production once. Every asset returned 200, the page painted,
+ * and not a single API call was ever made — because `default-src 'self'` with
+ * no script-src blocks inline execution, and the entire client was one inline
+ * module. Status codes cannot catch this; a source check can.
+ */
+const webDir = path.resolve(srcRoot, "../../web");
+const inlineScript = /<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/;
+for (const file of readdirSync(webDir).filter((f) => f.endsWith(".html"))) {
+  const html = readFileSync(path.join(webDir, file), "utf8");
+  check(`web/${file} has no inline <script>`, !inlineScript.test(html));
+}
+
+// Any script the pages DO reference must actually exist, or the app is equally
+// dead — just with a 404 instead of a CSP violation.
+for (const file of readdirSync(webDir).filter((f) => f.endsWith(".html"))) {
+  const html = readFileSync(path.join(webDir, file), "utf8");
+  for (const m of html.matchAll(/<script[^>]*\bsrc="\/([^"]+)"/g)) {
+    check(`web/${file} -> /${m[1]} exists`, existsSync(path.join(webDir, m[1]!)));
+  }
+}
+
+// The CSP itself must keep forbidding inline scripts. Relaxing it with
+// 'unsafe-inline' would silence the check above while reintroducing the risk it
+// exists to prevent.
+// Matched on basename + parent dir: a path suffix like "src/index.ts" does not
+// match on Windows, where the separator is a backslash.
+const indexTs = sources.find(
+  (s) => path.basename(s.file) === "index.ts" && path.dirname(s.file) === srcRoot,
+);
+check("index.ts was located for the CSP check", indexTs !== undefined);
+check("CSP does not allow 'unsafe-inline' scripts",
+  indexTs !== undefined && !/script-src[^;]*unsafe-inline/.test(indexTs.text));
 
 // The guard layer is only meaningful if it is the sole path to mutation.
 const executor = sources.find((s) => s.file.endsWith("executor.ts"))!;
