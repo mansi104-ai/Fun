@@ -63,10 +63,10 @@ exactly the point where Stripe's automation starts earning its 3.5%.
 
 ```bash
 flyctl secrets set --app mailwarden \
-  DIRECT_UPI_ID=yourname@okhdfcbank \
+  DIRECT_UPI_ID=mkb.kalra-1@okhdfcbank \
   DIRECT_PAYEE_NAME="Mailwarden" \
   DIRECT_PAY_INR=4200 \
-  ADMIN_EMAIL=6monthslearning.mansi@gmail.com
+  ADMIN_EMAIL=businessandbrands.india@gmail.com
 ```
 
 The pricing page shows the UPI section only once `DIRECT_UPI_ID` is set —

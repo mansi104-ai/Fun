@@ -307,8 +307,8 @@ export function directPayInfo(amountInr: number): DirectPayInfo {
 
 export function isAdmin(email: string | undefined): boolean {
   // An unset ADMIN_EMAIL must mean "nobody", never "everybody".
-  if (!config.adminEmail || !email) return false;
-  return email.trim().toLowerCase() === config.adminEmail;
+  if (config.adminEmails.length === 0 || !email) return false;
+  return config.adminEmails.includes(email.trim().toLowerCase());
 }
 
 /**

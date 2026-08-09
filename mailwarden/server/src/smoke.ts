@@ -772,7 +772,7 @@ check("Downgrade takes effect immediately",
  * matters is an unset ADMIN_EMAIL being read as "everyone".
  */
 check("No admin is configured in tests, so nobody is admin",
-  !isAdmin("anyone@example.com") && !isAdmin(config.adminEmail || "x@y.z"));
+  !isAdmin("anyone@example.com") && !isAdmin("someone-else@example.com"));
 check("Admin check rejects undefined", !isAdmin(undefined));
 check("Admin check rejects the empty string", !isAdmin(""));
 

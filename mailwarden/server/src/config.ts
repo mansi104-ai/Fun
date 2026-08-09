@@ -93,11 +93,20 @@ export const config = {
   },
 
   /**
-   * The single account allowed to grant plans by hand. Compared case-insensitively
-   * against the signed-in user email. Empty disables manual granting entirely,
-   * which is the correct default: an unset admin must never mean "anyone".
+   * Accounts allowed to grant plans by hand — comma-separated, compared
+   * case-insensitively against the SIGNED-IN user email.
+   *
+   * Note that is the Google account used to sign into Mailwarden, not a
+   * business address. Setting it to an address that never signs in locks the
+   * operator out of their own admin endpoint with a silent 403.
+   *
+   * Empty disables manual granting entirely. An unset admin must mean nobody,
+   * never everybody.
    */
-  adminEmail: (process.env.ADMIN_EMAIL ?? "").trim().toLowerCase(),
+  adminEmails: (process.env.ADMIN_EMAIL ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
 
   databasePath: optional("DATABASE_PATH", "./mailwarden.db"),
 
