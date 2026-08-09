@@ -76,7 +76,7 @@ export function priceCatalogue(): PriceInfo[] {
     {
       id: "starter",
       label: "Starter",
-      blurb: "Unlimited cleanups and higher-accuracy sorting.",
+      blurb: "Unlimited cleanups and two-pass sender classification.",
       amount: 1900,
       currency: "usd",
       mode: "subscription",

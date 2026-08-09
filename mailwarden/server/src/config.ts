@@ -108,6 +108,13 @@ export const config = {
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
 
+  /**
+   * Where operator alerts go — a Telegram/Discord/Slack/Zapier webhook URL.
+   * Unset means alerts are logged only, which is exactly how a lead-capture
+   * form ends up filling a table nobody reads.
+   */
+  notifyWebhookUrl: process.env.NOTIFY_WEBHOOK_URL ?? "",
+
   databasePath: optional("DATABASE_PATH", "./mailwarden.db"),
 
   /** Gmail messages.get quota is the sync bottleneck; keep concurrency modest. */

@@ -91,10 +91,20 @@
     reversible.
   </p>
 
-  <a class="btn" href="/auth/google">Connect Gmail</a>
-  <a class="btn" href="/pricing.html"
-     style="background:none;color:var(--accent);border:1px solid var(--border);margin-left:8px">
-     See the Founding 100</a>
+  <form id="inviteForm" style="display:flex; gap:10px; flex-wrap:wrap; max-width:520px">
+    <input type="email" id="inviteEmail" required autocomplete="email"
+           placeholder="you@gmail.com"
+           style="flex:1; min-width:230px; font:inherit; padding:13px 15px;
+                  border-radius:var(--radius); border:1px solid var(--border);
+                  background:var(--surface); color:var(--text)" />
+    <button class="btn" type="submit">Request my seat</button>
+  </form>
+  <p class="muted" id="inviteMsg" style="margin:12px 0 0"></p>
+  <p class="muted" style="margin:6px 0 0">
+    We add you by hand, usually within a few hours, and email you a link.
+    <a href="/pricing.html">See what a seat includes</a> ·
+    <a href="/auth/google">Already invited? Sign in</a>
+  </p>
 
   <!-- The consent screen is the highest-anxiety moment in the funnel.
        Answering the obvious objections BEFORE the Google redirect converts
@@ -137,7 +147,7 @@
     <p><strong>Free</strong> — full scan, full classification, and one complete
     sender cleanup, executed for real. No card.</p>
     <p><strong>Starter · $19/year</strong> — unlimited senders, unlimited cleanups,
-    higher-accuracy classification.</p>
+    two-pass sender classification.</p>
     <p style="margin:0"><strong>Pro · $39/year</strong> — everything in Starter, plus
     scheduled re-scans, unsubscribe verification, and up to 5 accounts.</p>
   </div>
@@ -147,5 +157,6 @@
     doesn't retain enough to sell.
   </p>
 </main>
+<script type="module" src="/index.js"></script>
 </body>
 </html>

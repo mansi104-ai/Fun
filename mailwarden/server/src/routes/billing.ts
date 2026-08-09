@@ -18,6 +18,7 @@ import {
 } from "../lib/billing.js";
 import type { Plan } from "../lib/entitlements.js";
 import { confirmOrder, createUpiOrder, pendingOrders, priceInr, upiConfigured } from "../lib/upi.js";
+import { notifyOperator } from "../lib/notify.js";
 import { currentUserId } from "./auth.js";
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
@@ -138,7 +139,13 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.code(404).send({ error: "no_user" });
 
     try {
-      return await createUpiOrder(userId, user.email, plan);
+      const order = await createUpiOrder(userId, user.email, plan);
+      notifyOperator(
+        "upi_order",
+        "UPI payment started",
+        `${user.email} — ${order.reference} for Rs ${order.amountInr}. Watch for it, then confirm.`,
+      );
+      return order;
     } catch (err) {
       return reply
         .code(409)
@@ -231,22 +238,30 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
           c: number;
         }
       ).c;
+      notifyOperator(
+        "access_request",
+        "Someone wants access",
+        `${email} — ${waiting} waiting. Add them at console.cloud.google.com -> OAuth consent screen -> Test users.`,
+      );
       return { ok: true, waiting };
     },
   );
 
   /**
-   * The founder's queue: who is waiting, so seats can be added to the Google
-   * Test users list by hand. Gated to users who already hold a paid plan —
-   * in practice, the operator.
+   * The operator queue: who is waiting, so seats can be added to the Google
+   * Test users list by hand.
+   *
+   * Gated on ADMIN_EMAIL, not on holding a paid plan. The operator is normally
+   * on the free plan themselves, so a plan-based gate locks them out of their
+   * own queue — and would hand it to every paying customer instead.
    */
   app.get("/api/access-request/list", async (req, reply) => {
     const userId = currentUserId(req.cookies);
     if (!userId) return reply.code(401).send({ error: "not_authenticated" });
-    const me = db.prepare(`SELECT plan FROM users WHERE id = ?`).get(userId) as
-      | { plan: string }
+    const me = db.prepare(`SELECT email FROM users WHERE id = ?`).get(userId) as
+      | { email: string }
       | undefined;
-    if (!me || me.plan === "free") return reply.code(403).send({ error: "forbidden" });
+    if (!isAdmin(me?.email)) return reply.code(403).send({ error: "forbidden" });
 
     audit(userId, "access_request.listed");
     return {

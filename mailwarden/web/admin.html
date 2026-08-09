@@ -1,0 +1,91 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mailwarden — operator</title>
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
+<meta name="robots" content="noindex" />
+<style>
+  :root {
+    --bg:#fbfbfa; --surface:#fff; --raised:#f4f3f0; --border:#e6e4e0;
+    --text:#1a1917; --muted:#6b6862; --accent:#2f5d50; --accent-fg:#fff;
+    --warn:#8a6516; --safe:#2f5d50; --radius:12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#151412; --surface:#1e1d1a; --raised:#26241f; --border:#33312d;
+      --text:#f0eeea; --muted:#9c988f; --accent:#6fae9b; --accent-fg:#10201b;
+      --warn:#d6a94a; --safe:#6fae9b;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width:960px; margin:0 auto; padding:28px 20px 80px; }
+  h1 { font-size:1.5rem; letter-spacing:-0.02em; margin:0 0 4px; }
+  h2 { font-size:1rem; margin:32px 0 10px; letter-spacing:-0.01em; }
+  .muted { color:var(--muted); font-size:.9rem; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th { text-align:left; font-size:.76rem; text-transform:uppercase; letter-spacing:.05em;
+       color:var(--muted); padding:8px 10px; border-bottom:1px solid var(--border); }
+  td { padding:10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  tr:hover td { background:var(--raised); }
+  .ref { font-family:ui-monospace,monospace; font-weight:700; letter-spacing:.04em; }
+  .pill { font-size:.74rem; padding:3px 9px; border-radius:999px; background:var(--raised); }
+  .pill.ok { color:var(--safe); font-weight:640; }
+  .pill.wait { color:var(--warn); font-weight:640; }
+  button { font:inherit; cursor:pointer; border-radius:9px; border:1px solid var(--border);
+           background:var(--surface); color:var(--text); padding:7px 13px; }
+  button:hover:not(:disabled) { background:var(--raised); }
+  button.primary { background:var(--accent); color:var(--accent-fg); border-color:transparent; font-weight:620; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  input { font:inherit; padding:7px 10px; border-radius:9px; border:1px solid var(--border);
+          background:var(--bg); color:var(--text); width:170px; }
+  .card { background:var(--surface); border:1px solid var(--border);
+          border-radius:var(--radius); padding:16px 18px; margin-bottom:14px; }
+  .err { color:var(--warn); }
+  code { background:var(--raised); padding:2px 6px; border-radius:5px; font-size:.85em; }
+</style>
+
+<div class="wrap">
+  <h1>Operator</h1>
+  <p class="muted" id="who">Checking access…</p>
+
+  <div id="gate" hidden class="card">
+    <p style="margin:0 0 8px"><b>Not an operator account.</b></p>
+    <p class="muted" style="margin:0">
+      This page is limited to the address in <code>ADMIN_EMAIL</code>. Sign in
+      with that Google account — it also has to be on Google's Test users list,
+      or it cannot sign in at all.
+    </p>
+  </div>
+
+  <div id="panel" hidden>
+    <h2>Payments to confirm</h2>
+    <p class="muted" style="margin-top:0">
+      Match the reference against your bank statement, paste the UTR, and confirm.
+      Confirming grants the plan immediately.
+    </p>
+    <div class="card" style="padding:0; overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Reference</th><th>Buyer</th><th>Plan</th><th>Amount</th>
+          <th>Started</th><th>Status</th><th></th>
+        </tr></thead>
+        <tbody id="orders"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <h2>Waiting for access</h2>
+    <p class="muted" style="margin-top:0">
+      Add each to <b>Google Cloud Console → OAuth consent screen → Test users</b>,
+      then email them that they are in.
+    </p>
+    <div class="card" style="padding:0; overflow-x:auto">
+      <table>
+        <thead><tr><th>Email</th><th>Asked</th><th>Invited</th></tr></thead>
+        <tbody id="requests"><tr><td colspan="3" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/admin.js"></script>
