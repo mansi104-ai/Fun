@@ -157,6 +157,17 @@ addColumn("senders", "facts_hash", "TEXT");
 addColumn("senders", "decision_count", "INTEGER NOT NULL DEFAULT 0");
 addColumn("senders", "decided_at", "INTEGER");
 
+// Iterations 44/45 — unsubscribe, and the verification nobody else does.
+//   method  one-click | link | mailto
+//   status  sent | needs_user | failed | verified | ignored
+// `unsubscribed_at` is the clock that iteration 45 checks against: if mail from
+// this sender keeps arriving 14 days later, the sender ignored the request and
+// we can say so.
+addColumn("senders", "unsubscribed_at", "INTEGER");
+addColumn("senders", "unsubscribe_method", "TEXT");
+addColumn("senders", "unsubscribe_status", "TEXT");
+addColumn("senders", "unsubscribe_detail", "TEXT");
+
 export const now = (): number => Date.now();
 
 export function audit(userId: string, action: string, detail?: unknown): void {

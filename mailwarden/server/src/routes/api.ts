@@ -5,6 +5,7 @@ import { ReconnectRequired } from "../gmail/client.js";
 import { executeBatch, planBatch, undoBatch, type BatchAction } from "../gmail/executor.js";
 import { listSenderMessages, readMessage } from "../gmail/reader.js";
 import { runSync, syncProgress } from "../gmail/sync.js";
+import { unsubscribeFromSender } from "../gmail/unsubscribe.js";
 import {
   canExecuteBatch,
   entitlementsFor,
@@ -156,7 +157,8 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
       .prepare(
         `SELECT sender_key, display_name, domain, message_count, unread_count, total_bytes,
                 first_seen, last_seen, has_unsubscribe, category, confidence, reason,
-                protected, user_protected, user_decision, classified_by
+                protected, user_protected, user_decision, classified_by,
+                unsubscribed_at, unsubscribe_status, unsubscribe_method
          FROM senders WHERE account_id = ? AND message_count > 0
          ORDER BY message_count DESC`,
       )
@@ -181,6 +183,9 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
         userProtected: r.user_protected as number,
         classifiedBy: r.classified_by,
         userDecision: r.user_decision,
+        unsubscribedAt: r.unsubscribed_at,
+        unsubscribeStatus: r.unsubscribe_status,
+        unsubscribeMethod: r.unsubscribe_method,
         suggested: isSuggestable(r.category as string | null, r.confidence as number | null),
       })),
     };
@@ -248,6 +253,39 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
       throw err;
     }
   });
+
+  /**
+   * Unsubscribe from a sender (roadmap 44).
+   *
+   * Never bulk. Unsubscribing is an outward-facing act — it tells a third party
+   * something about you — so it stays one deliberate click per sender.
+   */
+  app.post<{ Params: { key: string } }>(
+    "/api/senders/:key/unsubscribe",
+    async (req, reply) => {
+      const ctx = requireAccount(req, reply);
+      if (!ctx) return;
+
+      const senderKey = decodeURIComponent(req.params.key);
+      const known = db
+        .prepare(`SELECT 1 AS ok FROM senders WHERE account_id = ? AND sender_key = ?`)
+        .get(ctx.accountId, senderKey);
+      if (!known) return reply.code(404).send({ error: "unknown_sender" });
+
+      try {
+        const result = await unsubscribeFromSender(ctx.accountId, senderKey);
+        audit(ctx.userId, "sender.unsubscribe", {
+          senderKey, method: result.method, status: result.status,
+        });
+        return result;
+      } catch (err) {
+        if (err instanceof ReconnectRequired) {
+          return reply.code(409).send({ error: "reconnect_required" });
+        }
+        throw err;
+      }
+    },
+  );
 
   // ── Categories: the browse-by-kind layer ───────────────────────────────
 

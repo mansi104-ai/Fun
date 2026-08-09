@@ -255,7 +255,7 @@ export function computeCategories(accountId: string): CategoryView[] {
       cleanableBytes: verdict.allowed.reduce((s, c) => s + c.size_bytes, 0),
       cleanableSenders: senders.filter((s) => s.cleanableCount > 0).length,
       heldMessages: base.totalMessages - cleanableMessages,
-      heldReasons: [...new Set(verdict.exclusions.map((e) => e.reason))].slice(0, 4),
+      heldReasons: summariseHeld(verdict.exclusions),
       needsSplit: verdict.violations.some(
         (v) => v.code === "BATCH_TOO_LARGE" || v.code === "TOO_MANY_SENDERS",
       ),
@@ -266,6 +266,37 @@ export function computeCategories(accountId: string): CategoryView[] {
   return views
     .sort((a, b) => a.order - b.order)
     .map(({ order: _order, ...rest }) => rest);
+}
+
+/**
+ * Collapses per-sender exclusions into one line per reason.
+ *
+ * Exclusions arrive one per sender, so a category where twelve senders each had
+ * a few recent messages produced twelve near-identical bullets differing only
+ * in a number. Grouping by guard code and summing the counts says the same
+ * thing once, accurately.
+ */
+const HELD_LABEL: Record<string, (n: string) => string> = {
+  TOO_RECENT: (n) => `${n} from the last 7 days — recent mail is more likely to still matter.`,
+  PROTECTED_CATEGORY: (n) => `${n} from protected senders — receipts, codes, travel, or bank mail.`,
+  REPLIED_SENDER: (n) => `${n} from people you have replied to.`,
+  USER_PINNED: (n) => `${n} from senders you pinned as protected.`,
+  LOW_CONFIDENCE: (n) => `${n} we are not confident enough to act on.`,
+};
+
+function summariseHeld(exclusions: { code: string; messageCount: number; reason: string }[]): string[] {
+  const byCode = new Map<string, number>();
+  for (const e of exclusions) byCode.set(e.code, (byCode.get(e.code) ?? 0) + e.messageCount);
+
+  return [...byCode]
+    .sort((a, b) => b[1] - a[1])
+    .map(([code, n]) => {
+      const label = HELD_LABEL[code];
+      if (label) return label(n.toLocaleString());
+      // Unknown guard: fall back to its own wording rather than dropping it —
+      // a held message the user cannot see explained is the worst outcome.
+      return exclusions.find((e) => e.code === code)!.reason;
+    });
 }
 
 export function categoryById(accountId: string, id: string): CategoryView | null {

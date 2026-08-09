@@ -21,6 +21,7 @@ import { CATEGORIES } from "./classify/taxonomy.js";
 import { db } from "./db.js";
 import { planBatch } from "./gmail/executor.js";
 import { aggregateSenders } from "./gmail/sync.js";
+import { isPubliclyRoutable, parseTargets } from "./gmail/unsubscribe.js";
 import { newId } from "./lib/crypto.js";
 import { canExecuteBatch, entitlementsFor } from "./lib/entitlements.js";
 import { DAY_MS, LIMITS } from "./safety/limits.js";
@@ -600,6 +601,44 @@ check("Undo restores the counts",
 
 db.prepare(`DELETE FROM users WHERE id = ?`).run(stateUser);
 db.prepare(`DELETE FROM messages_meta WHERE account_id = ?`).run(stateAcct);
+
+// ── 13c. Unsubscribe: parsing and SSRF containment ───────────────────────
+
+section("13c. Unsubscribe engine");
+
+{
+  const p = parseTargets("<https://ex.com/u?id=1>, <mailto:un@ex.com?subject=off>");
+  check("Parses both HTTPS and mailto targets",
+    p.https[0] === "https://ex.com/u?id=1" && p.mailto[0] === "mailto:un@ex.com?subject=off");
+}
+check("Ignores http:// — we only auto-POST over TLS",
+  parseTargets("<http://ex.com/u>").https.length === 0);
+check("Handles a header with no angle brackets", parseTargets("nonsense").https.length === 0);
+
+/**
+ * The one-click endpoint POSTs to a URL taken from an email header —
+ * attacker-controlled input reaching our server's network. Without these
+ * checks it is a direct SSRF into the Fly private network.
+ */
+const ssrf = [
+  ["https://127.0.0.1/u", false, "loopback"],
+  ["https://10.0.0.5/u", false, "private 10/8"],
+  ["https://192.168.1.1/u", false, "private 192.168/16"],
+  ["https://172.16.9.9/u", false, "private 172.16/12"],
+  ["https://169.254.169.254/latest/meta-data", false, "cloud metadata"],
+  ["https://100.64.0.1/u", false, "carrier-grade NAT"],
+  ["https://0.0.0.0/u", false, "unspecified"],
+  ["http://example.com/u", false, "plain http"],
+  ["ftp://example.com/u", false, "non-http scheme"],
+  ["not a url", false, "malformed"],
+  ["https://[::1]/u", false, "IPv6 loopback"],
+  ["https://8.8.8.8/u", true, "public IPv4"],
+] as const;
+
+for (const [url, expected, label] of ssrf) {
+  const got = await isPubliclyRoutable(url);
+  check(`SSRF guard: ${label} -> ${expected ? "allowed" : "blocked"}`, got === expected, url);
+}
 
 // ── 14. Agent: learning, caching, and degradation ────────────────────────
 

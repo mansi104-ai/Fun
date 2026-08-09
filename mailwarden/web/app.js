@@ -62,6 +62,26 @@ let currentCat = null;
 let excluded = new Set();
 let reviewCat = "";
 
+/**
+ * The brand lockup is the way home from every screen — job, receipt, sender
+ * review, and a finished scan. Screens previously each carried their own back
+ * link, so anywhere one was missing was a dead end.
+ *
+ * Deliberately does nothing mid-scan: navigating away from a running scan looks
+ * like it was cancelled, and the scan screen has no state worth abandoning.
+ */
+$("goHome").onclick = async () => {
+  const scanning = !$("scan").classList.contains("hidden")
+    && !$("scanProgress").classList.contains("hidden");
+  if (scanning) return;
+  try {
+    await loadHome();
+  } catch {
+    // No account or no scan yet — the scan screen IS home in that case.
+    show("scan");
+  }
+};
+
 // ── Screen 1: scan ───────────────────────────────────────────────────
 $("startScan").onclick = async () => {
   $("startScan").disabled = true;
@@ -584,6 +604,9 @@ function renderSenders() {
   for (const el of document.querySelectorAll("[data-read]")) {
     el.onclick = () => openReader(el.dataset.key);
   }
+  for (const el of document.querySelectorAll("[data-unsub]")) {
+    el.onclick = () => runUnsubscribe(el, el.dataset.key);
+  }
   for (const el of document.querySelectorAll("[data-pin]")) {
     el.onclick = async () => {
       const { key, pin } = el.dataset;
@@ -608,12 +631,19 @@ function cardHtml(s) {
   // Reading is always offered, including for protected senders: seeing what a
   // sender actually sends is how you judge whether the lock is right.
   const read = `<button data-key="${esc(s.senderKey)}" data-read="1">Read mail</button>`;
+  // Offered only when the sender advertises List-Unsubscribe. A button that
+  // usually fails teaches people to ignore it.
+  const unsub = !s.hasUnsubscribe ? ""
+    : s.unsubscribeStatus === "sent"
+      ? `<span class="tag done">unsubscribed</span>`
+      : `<button data-key="${esc(s.senderKey)}" data-unsub="1">Unsubscribe</button>`;
 
   const controls = s.protected
     ? `<span class="lock-note">Locked — nothing here will be touched in bulk.</span>
-       <div class="actions" style="margin-top:8px">${read}${release}${pin}</div>`
+       <div class="actions" style="margin-top:8px">${read}${unsub}${release}${pin}</div>`
     : `<div class="actions">
          ${read}
+         ${unsub}
          <button data-key="${s.senderKey}" data-act="keep">Keep</button>
          <button data-key="${s.senderKey}" data-act="archive">Archive all ${fmt.format(s.messageCount)}</button>
          <button data-key="${s.senderKey}" data-act="trash" class="danger">Trash all ${fmt.format(s.messageCount)}</button>
@@ -684,6 +714,36 @@ $("confirmBtn").onclick = async () => {
     alert(err.status === 402 ? err.data.message : `Something went wrong: ${err.message}`);
   }
 };
+
+/**
+ * Unsubscribe is per-sender and never bulk: it tells a third party something
+ * about the user, so it stays one deliberate click.
+ */
+async function runUnsubscribe(button, senderKey) {
+  button.disabled = true;
+  button.textContent = "Unsubscribing…";
+  try {
+    const r = await api(`/api/senders/${encodeURIComponent(senderKey)}/unsubscribe`, { method: "POST" });
+    if (r.status === "sent") {
+      button.replaceWith(Object.assign(document.createElement("span"),
+        { className: "tag done", textContent: "unsubscribed" }));
+    } else if (r.url) {
+      // We hand the link over rather than following it — see unsubscribe.ts.
+      window.open(r.url, "_blank", "noopener,noreferrer");
+      button.disabled = false;
+      button.textContent = "Open unsubscribe page";
+    } else {
+      button.disabled = false;
+      button.textContent = "Unsubscribe";
+    }
+    alert(r.message);
+    senders = (await api("/api/senders")).senders;
+  } catch (err) {
+    button.disabled = false;
+    button.textContent = "Unsubscribe";
+    alert(`Could not unsubscribe: ${err.message}`);
+  }
+}
 
 // ── Reading mail ─────────────────────────────────────────────────────
 //

@@ -18,11 +18,13 @@
   :root {
     --bg: #fbfbfa; --surface: #fff; --border: #e6e4e0; --text: #1a1917;
     --muted: #6b6862; --accent: #2f5d50; --accent-fg: #fff; --radius: 12px;
+    --brand-tile:#141311; --brand-ink:#ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #151412; --surface: #1e1d1a; --border: #33312d; --text: #f0eeea;
       --muted: #9c988f; --accent: #6fae9b; --accent-fg: #10201b;
+      --brand-tile:#f0eeea; --brand-ink:#141311;
     }
   }
   * { box-sizing: border-box; }
@@ -50,8 +52,18 @@
   ul { padding-left: 20px; margin: 0 0 16px; }
   li { margin-bottom: 8px; }
   .muted { color: var(--muted); font-size: .92rem; }
-  .brand { display: inline-block; color: var(--text); margin-bottom: 28px; }
-  .brand svg { height: 40px; width: auto; display: block; }
+  /* Block-level flex, not inline-flex: inline let the beta badge ride up
+     alongside the wordmark and crowd it. */
+  .brand {
+    display: flex; width: fit-content; align-items: center; gap: 12px;
+    color: var(--text); margin-bottom: 30px; text-decoration: none;
+  }
+  .brand-tile {
+    display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px;
+    background: var(--brand-tile); color: var(--brand-ink); flex-shrink: 0;
+  }
+  .brand-tile svg { width: 30px; height: 30px; display: block; }
+  .brand-word { font-weight: 660; font-size: 1.25rem; letter-spacing: -0.02em; }
   strong { font-weight: 650; }
   .badge {
     display: inline-block; font-size: .78rem; padding: 3px 9px; border-radius: 999px;
@@ -62,13 +74,14 @@
 <body>
 <main class="wrap">
   <a class="brand" href="/" aria-label="Mailwarden home">
-    <svg viewBox="0 0 430 100" fill="none" role="img" aria-label="Mailwarden">
-  <rect x="4" y="22" width="68" height="52" rx="9" stroke="currentColor" stroke-width="7"/>
-  <path d="M8 27l27 22a5 5 0 0 0 6 0l27-22" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path fill="currentColor" d="M80 47C80 60 78 62 65 62C78 62 80 64 80 77C80 64 82 62 95 62C82 62 80 60 80 47Z"/>
-  <path fill="currentColor" d="M92 72.5C92 78 91 79 85.5 79C91 79 92 80 92 85.5C92 80 93 79 98.5 79C93 79 92 78 92 72.5Z"/>
-        <text x="118" y="62" fill="currentColor" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, sans-serif" font-size="29" font-weight="500" letter-spacing="6.5">MAILWARDEN</text>
+    <span class="brand-tile" aria-hidden="true">
+      <svg viewBox="0 0 100 100" fill="none">
+        <rect x="18" y="30" width="64" height="44" rx="8" stroke="currentColor" stroke-width="8"/>
+        <path d="M22 34l24 18a5 5 0 0 0 8 0l24-18" stroke="currentColor" stroke-width="8"
+              stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
+    </span>
+    <span class="brand-word">Mailwarden</span>
   </a>
   <span class="badge">Founding 100 · closed beta</span>
   <h1>Clean your Gmail without ever losing anything.</h1>

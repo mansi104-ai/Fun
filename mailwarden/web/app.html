@@ -13,6 +13,7 @@
     --accent:#2f5d50; --accent-fg:#fff; --accent-soft:#e8f0ec;
     --danger:#a33b2a; --warn:#8a6516; --safe:#2f5d50;
     --radius:14px;
+    --brand-tile:#141311; --brand-ink:#ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -20,6 +21,7 @@
       --text:#f0eeea; --muted:#9c988f;
       --accent:#6fae9b; --accent-fg:#10201b; --accent-soft:#22322c;
       --danger:#e2836f; --warn:#d6a94a; --safe:#6fae9b;
+      --brand-tile:#f0eeea; --brand-ink:#141311;
     }
   }
   * { box-sizing:border-box; }
@@ -33,9 +35,22 @@
     display:flex; align-items:center; justify-content:space-between;
     margin-bottom:32px; gap:12px; flex-wrap:wrap;
   }
-  /* Wordmark is drawn in the SVG, so the tracking survives any font stack. */
-  .logo { display:flex; align-items:center; gap:9px; color:var(--text); }
-  .logo svg { height:34px; width:auto; display:block; }
+  /* The mark sits in a solid tile, as in the source artwork. A tile reads as a
+     product logo at small sizes where a thin open outline reads as a stray
+     icon — and it holds its own against the page instead of dissolving into it. */
+  .logo {
+    display:flex; align-items:center; gap:11px; background:none; border:none;
+    padding:4px; margin:-4px; border-radius:12px; color:var(--text); cursor:pointer;
+  }
+  .logo:hover { background:var(--raised); }
+  .logo-tile {
+    display:grid; place-items:center; width:34px; height:34px; border-radius:9px;
+    background:var(--brand-tile); color:var(--brand-ink); flex-shrink:0;
+  }
+  .logo-tile svg { width:26px; height:26px; display:block; }
+  .logo-word {
+    font-weight:640; letter-spacing:-0.015em; font-size:1.06rem; line-height:1;
+  }
   .plan { font-size:.82rem; color:var(--muted); }
   h1 { font-size:clamp(1.5rem, 4vw, 2.1rem); letter-spacing:-0.025em; margin:0 0 8px; line-height:1.2; }
   .sub { color:var(--muted); margin:0 0 28px; font-size:1.02rem; }
@@ -136,6 +151,28 @@
   .section-h { font-size:.82rem; font-weight:640; text-transform:uppercase;
                letter-spacing:.06em; color:var(--muted); margin:34px 0 12px; }
 
+  /* Collapsible secondary sections. Everything below the main workspace is one
+     of these, so the page reads as: pick a category, act, and optionally dig in
+     — rather than four blocks all shouting at once. */
+  details.fold {
+    border:1px solid var(--border); border-radius:var(--radius);
+    background:var(--surface); margin-bottom:10px; overflow:hidden;
+  }
+  details.fold > summary {
+    cursor:pointer; padding:15px 18px; font-weight:580; font-size:.94rem;
+    list-style:none; display:flex; align-items:center; justify-content:space-between;
+  }
+  details.fold > summary::-webkit-details-marker { display:none; }
+  details.fold > summary::after { content:"▾"; color:var(--muted); transition:transform .15s ease; }
+  details.fold[open] > summary { border-bottom:1px solid var(--border); }
+  details.fold[open] > summary::after { transform:rotate(180deg); }
+  details.fold > summary:hover { background:var(--raised); }
+  details.fold > *:not(summary) { padding:16px 18px; }
+  details.fold .cat-list { border:none; border-radius:0; padding:0; margin:0; }
+  details.fold .grid { padding:16px 18px; }
+
+  .tag.done { color:var(--safe); background:var(--accent-soft); font-weight:600; }
+
   .stat-row {
     display:flex; gap:26px; flex-wrap:wrap; padding:16px 20px; margin-bottom:26px;
     background:var(--raised); border-radius:var(--radius);
@@ -189,8 +226,11 @@
   dialog { border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); color:var(--text); padding:24px; max-width:520px; width:calc(100% - 36px); }
 
   /* ── Reader ─────────────────────────────────────────────────────────── */
-  dialog.reader { max-width:760px; max-height:86vh; display:flex; flex-direction:column; padding:0; }
-  dialog.reader[open] { display:flex; }
+  /* display MUST NOT be set on the base rule — that overrides the UA's
+     `display:none` for a closed <dialog>, so the empty shell renders inline at
+     the bottom of the page. Only the [open] state gets a display value. */
+  dialog.reader { max-width:760px; max-height:86vh; padding:0; }
+  dialog.reader[open] { display:flex; flex-direction:column; }
   .reader-head {
     display:flex; align-items:center; justify-content:space-between; gap:12px;
     padding:16px 20px; border-bottom:1px solid var(--border); position:sticky; top:0;
@@ -233,17 +273,21 @@
 
 <div class="wrap">
   <header>
-    <span class="logo">
-      <!-- Inlined rather than <img src>: it inherits currentColor, so the mark
-           flips with the theme instead of needing a light and a dark file. -->
-      <svg viewBox="0 0 430 100" fill="none" role="img" aria-label="Mailwarden">
-  <rect x="4" y="22" width="68" height="52" rx="9" stroke="currentColor" stroke-width="7"/>
-  <path d="M8 27l27 22a5 5 0 0 0 6 0l27-22" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path fill="currentColor" d="M80 47C80 60 78 62 65 62C78 62 80 64 80 77C80 64 82 62 95 62C82 62 80 60 80 47Z"/>
-  <path fill="currentColor" d="M92 72.5C92 78 91 79 85.5 79C91 79 92 80 92 85.5C92 80 93 79 98.5 79C93 79 92 78 92 72.5Z"/>
-        <text x="118" y="62" fill="currentColor" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, sans-serif" font-size="29" font-weight="500" letter-spacing="6.5">MAILWARDEN</text>
-      </svg>
-    </span>
+    <!-- The brand is the way home from every screen. It is a real <button>
+         rather than a styled span so it is keyboard-reachable and announced as
+         a control. -->
+    <button class="logo" id="goHome" title="Back to all categories">
+      <span class="logo-tile" aria-hidden="true">
+        <svg viewBox="0 0 100 100" fill="none">
+          <rect x="18" y="30" width="64" height="44" rx="8"
+                stroke="currentColor" stroke-width="8"/>
+          <path d="M22 34l24 18a5 5 0 0 0 8 0l24-18"
+                stroke="currentColor" stroke-width="8"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="logo-word">Mailwarden</span>
+    </button>
     <span class="plan" id="plan"></span>
   </header>
 
@@ -270,15 +314,27 @@
     </div>
     <div class="cat-panel" id="catPanel"></div>
 
-    <div class="section-h">All categories we found</div>
-    <div class="cat-list" id="catList"></div>
+    <!-- The dropdown already covers every category, so the full list is a
+         secondary way to browse rather than a second primary control competing
+         with it. Collapsed by default keeps one obvious path down the page. -->
+    <details class="fold">
+      <summary>Browse all categories</summary>
+      <div class="cat-list" id="catList"></div>
+    </details>
 
-    <div class="section-h">Or use a one-click cleanup</div>
-    <div class="grid" id="tiles"></div>
+    <details class="fold">
+      <summary>One-click cleanups</summary>
+      <div class="grid" id="tiles"></div>
+    </details>
 
-    <p style="margin-top:26px">
-      <button class="link-btn" id="toAdvanced">Review sender by sender →</button>
-    </p>
+    <details class="fold">
+      <summary>Advanced — decide sender by sender</summary>
+      <p class="excl" style="margin:12px 0 14px">
+        Every sender we found, with the reason for each decision. This is also
+        where you read mail, unsubscribe, and pin senders as protected.
+      </p>
+      <button id="toAdvanced">Open sender review</button>
+    </details>
   </section>
 
   <!-- ── Screen 3: one job ────────────────────────────────────────────── -->
