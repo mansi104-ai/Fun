@@ -16,47 +16,25 @@
 <meta name="twitter:card" content="summary_large_image" />
 <link rel="stylesheet" href="/brand.css" />
 <style>
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
-  .wrap { max-width: 720px; margin: 0 auto; padding: 64px 24px 96px; }
-  h1 { font-size: clamp(2rem, 5vw, 2.9rem); line-height: 1.15; letter-spacing: -0.022em; margin: 0 0 16px; }
-  h2 { font-size: 1.15rem; letter-spacing: -0.01em; margin: 40px 0 12px; }
-  p { margin: 0 0 16px; }
-  .lede { font-size: 1.15rem; color: var(--muted); margin-bottom: 32px; }
-  .btn {
-    display: inline-block; background: var(--accent); color: var(--accent-fg);
-    padding: 13px 22px; border-radius: var(--radius); text-decoration: none;
-    font-weight: 600; border: 0; cursor: pointer; font-size: 1rem;
-  }
-  .btn:hover { opacity: .9; }
-  .card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 22px; margin: 24px 0;
-  }
-  .card h3 { margin: 0 0 10px; font-size: 1rem; }
-  ul { padding-left: 20px; margin: 0 0 16px; }
-  li { margin-bottom: 8px; }
-  .muted { color: var(--muted); font-size: .92rem; }
-  /* Block-level flex, not inline-flex: inline let the beta badge ride up
-     alongside the wordmark and crowd it. */
-  .brand {
-    display: flex; width: fit-content; align-items: center; gap: 12px;
-    color: var(--text); margin-bottom: 30px; text-decoration: none;
-  }
-  .brand-tile {
-    display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px;
-    background: var(--brand-tile); color: var(--brand-ink); flex-shrink: 0;
-  }
-  .brand-tile svg { width: 30px; height: 30px; display: block; }
-  .brand-word { font-weight: 660; font-size: 1.25rem; letter-spacing: -0.02em; }
-  strong { font-weight: 650; }
+  /* Page-specific only. Everything shared lives in brand.css. */
+  .brand { margin-bottom: 28px; }
+  ul { padding-left: 20px; margin: 0 0 14px; }
+  li { margin-bottom: 7px; }
+  strong { font-weight: 640; }
   .badge {
-    display: inline-block; font-size: .78rem; padding: 3px 9px; border-radius: 999px;
-    background: var(--border); color: var(--muted); margin-bottom: 20px;
+    display: inline-block; font-size: .78rem; padding: 4px 10px; border-radius: 999px;
+    background: var(--raised); color: var(--muted); margin-bottom: 18px;
+  }
+  .card { margin: 22px 0; }
+  /* The request form stacks on a phone instead of squeezing a 40%-wide input
+     next to a button whose label then wraps. */
+  .signup { display: flex; gap: 10px; flex-wrap: wrap; max-width: 520px; }
+  .signup input { flex: 1 1 240px; }
+  /* flex-basis follows the main axis: once the container turns to a column,
+     `flex: 1 1 240px` sets the input HEIGHT to 240px. Reset it explicitly. */
+  @media (max-width: 560px) {
+    .signup { flex-direction: column; }
+    .signup input { flex: 0 0 auto; width: 100%; }
   }
 </style>
 </head>
@@ -65,20 +43,16 @@
   <a class="brand" href="/" aria-label="Mailwarden home">
     <span class="brand-tile" aria-hidden="true">
       <svg viewBox="0 0 100 100" fill="none" aria-hidden="true">
-          <path d="M50 8 L86 22 v30 c0 22-16 33-36 40C30 85 14 74 14 52 V22 Z"
-                stroke="currentColor" stroke-width="7"
-                stroke-linejoin="round" fill="none"/>
-          <path d="M32 40h36v22H32z" stroke="currentColor" stroke-width="6"
-                stroke-linejoin="round"/>
-          <path d="M33 41l15 12a4 4 0 0 0 4 0l15-12" stroke="currentColor"
-                stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <rect x="18" y="30" width="64" height="44" rx="8" stroke="currentColor" stroke-width="8"/>
+        <path d="M22 34l24 18a5 5 0 0 0 8 0l24-18" stroke="currentColor" stroke-width="8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
     </span>
     <span class="brand-word">mailwarden</span>
   </a>
   <span class="badge">Founding 100 · closed beta</span>
   <h1>Clean your Gmail without ever losing anything.</h1>
-  <p class="display" style="font-size:1.15rem; color:var(--accent-text); margin:0 0 14px">
+  <p style="font-size:1.15rem; color:var(--accent-text); margin:0 0 14px">
     Clean inbox. Clear mind. More focus.
   </p>
   <p class="lede">
@@ -87,12 +61,9 @@
     reversible.
   </p>
 
-  <form id="inviteForm" style="display:flex; gap:10px; flex-wrap:wrap; max-width:520px">
+  <form id="inviteForm" class="signup">
     <input type="email" id="inviteEmail" required autocomplete="email"
-           placeholder="you@gmail.com"
-           style="flex:1; min-width:230px; font:inherit; padding:13px 15px;
-                  border-radius:var(--radius); border:1px solid var(--border);
-                  background:var(--surface); color:var(--text)" />
+           placeholder="you@gmail.com" />
     <button class="btn" type="submit">Request my seat</button>
   </form>
   <p class="muted" id="inviteMsg" style="margin:12px 0 0"></p>
@@ -140,12 +111,12 @@
 
   <h2>Pricing</h2>
   <div class="card">
-    <p><strong>Free</strong> — full scan, full classification, and one complete
-    sender cleanup, executed for real. No card.</p>
-    <p><strong>Starter · $19/year</strong> — unlimited senders, unlimited cleanups,
-    two-pass sender classification.</p>
-    <p style="margin:0"><strong>Pro · $39/year</strong> — everything in Starter, plus
-    scheduled re-scans, unsubscribe verification, and up to 5 accounts.</p>
+    <p><strong>Free</strong> — full scan, full sorting, and one complete sender
+    cleanup, executed for real. No card.</p>
+    <p style="margin:0"><strong>Founding 100 · ₹799 once</strong> — unlimited
+    cleanups, scheduled re-scans, unsubscribe verification, up to 5 accounts,
+    and every future feature. One payment, not a subscription.
+    <a href="/pricing.html">See the details</a>.</p>
   </div>
   <p class="muted">
     We will never sell your data or your metadata. That is not a policy we could

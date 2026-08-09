@@ -1,21 +1,21 @@
 <!--
-  Favicon: gold shield on BBI ink, drawn for 16px.
+  Favicon: white envelope on near-black, drawn for 16px.
 
-  The shield comes from the BBI brand kit, where Mailwarden is shown with one
-  rather than an envelope — "warden" is the half of the name doing the work.
-  The envelope sits inside so the mark still reads as mail.
+  Deliberately NOT the header mark scaled down — at 16px thin strokes merge into
+  a grey smear, so this variant fills more of the tile and thickens everything.
 
-  Deliberately NOT the header mark scaled down: at 16px thin strokes turn to
-  grey mush, so this variant fills more of the tile and thickens everything.
   The tile stays because a browser tab shows the icon against light chrome in
-  one theme and dark in the other; an untiled gold mark disappears on the light one.
+  one theme and dark in the other; an untiled white mark disappears on the light
+  one.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"
      role="img" aria-label="Mailwarden">
   <rect width="100" height="100" rx="22" fill="#0a0a0a"/>
-  <path d="M50 14 L84 27 v27 c0 20-15 30-34 37C31 84 16 74 16 54 V27 Z"
-        stroke="#d4af37" stroke-width="8" stroke-linejoin="round" fill="none"/>
-  <path d="M33 42h34v20H33z" stroke="#d4af37" stroke-width="7" stroke-linejoin="round" fill="none"/>
-  <path d="M34 43l14 11a4 4 0 0 0 4 0l14-11"
-        stroke="#d4af37" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect x="13" y="27" width="61" height="46" rx="8"
+        stroke="#fff" stroke-width="10" fill="none"/>
+  <path d="M17 32l24 18a5 5 0 0 0 6 0l24-18"
+        stroke="#fff" stroke-width="10" fill="none"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="#fff"
+        d="M80 45C80 59 78 61 64 61C78 61 80 63 80 77C80 63 82 61 96 61C82 61 80 59 80 45Z"/>
 </svg>

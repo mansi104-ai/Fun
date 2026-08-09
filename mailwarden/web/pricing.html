@@ -6,61 +6,35 @@
 <meta name="theme-color" content="#0a0a0a" />
 <link rel="stylesheet" href="/brand.css" />
 <style>
-  * { box-sizing:border-box; }
-  body {
-    margin:0; background:var(--bg); color:var(--text);
-    font:16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
-    -webkit-font-smoothing:antialiased;
+  .brand { margin-bottom: 28px; }
+  .card.hero { border-color: var(--text); }
+  .price { font-size: clamp(2rem, 8vw, 2.5rem); font-weight: 720; letter-spacing: -0.03em; line-height: 1; }
+  .price small { font-size: .9rem; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+  .seats {
+    display: inline-block; font-size: .78rem; padding: 4px 10px; border-radius: 999px;
+    background: var(--raised); color: var(--text); font-weight: 620; margin-bottom: 12px;
   }
-  .wrap { max-width:760px; margin:0 auto; padding:56px 24px 96px; }
-  .brand { display:flex; width:fit-content; align-items:center; gap:12px;
-           color:var(--text); text-decoration:none; margin-bottom:34px; }
-  .brand-tile { display:grid; place-items:center; width:40px; height:40px;
-                border-radius:11px; background:var(--brand-tile); color:var(--brand-ink); }
-  .brand-tile svg { width:30px; height:30px; display:block; }
-  .brand-word { font-weight:660; font-size:1.25rem; letter-spacing:-0.02em; }
-  h1 { font-size:clamp(1.9rem,5vw,2.6rem); line-height:1.15; letter-spacing:-0.022em; margin:0 0 14px; }
-  .lede { font-size:1.12rem; color:var(--muted); margin:0 0 34px; }
-  .card { background:var(--surface); border:1px solid var(--border);
-          border-radius:var(--radius); padding:26px; margin-bottom:16px; }
-  .card.hero { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
-  .price { font-size:2.6rem; font-weight:760; letter-spacing:-0.035em; line-height:1; }
-  .price small { font-size:.95rem; font-weight:500; color:var(--muted); letter-spacing:0; }
-  .seats { display:inline-block; font-size:.8rem; padding:4px 11px; border-radius:999px;
-           background:var(--accent-soft); color:var(--accent); font-weight:640; margin-bottom:14px; }
-  ul { padding-left:20px; margin:16px 0 0; }
-  li { margin-bottom:7px; }
-  .btn { display:inline-block; width:100%; text-align:center; background:var(--accent);
-         color:var(--accent-fg); padding:15px 24px; border-radius:12px; border:0;
-         font:inherit; font-weight:650; font-size:1.02rem; cursor:pointer; margin-top:20px; }
-  .btn:hover:not(:disabled) { opacity:.9; }
-  .btn:disabled { opacity:.5; cursor:not-allowed; }
-  .btn.ghost { background:none; color:var(--accent); border:1px solid var(--border); }
-  .muted { color:var(--muted); font-size:.92rem; }
-  .row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-  @media (max-width:620px) { .row { grid-template-columns:1fr; } }
-  input, textarea {
-    font:inherit; width:100%; padding:13px 15px; border-radius:11px;
-    border:1px solid var(--border); background:var(--bg); color:var(--text);
+  ul { padding-left: 20px; margin: 14px 0 0; }
+  li { margin-bottom: 7px; }
+  .note {
+    border-left: 3px solid var(--text); background: var(--raised);
+    padding: 14px 16px; border-radius: var(--radius-sm); font-size: .92rem; margin: 20px 0;
   }
-  .note { border-left:3px solid var(--accent); background:var(--accent-soft);
-          padding:14px 16px; border-radius:9px; font-size:.93rem; margin:22px 0; }
-  h2 { font-size:1.1rem; margin:38px 0 12px; letter-spacing:-0.01em; }
-  .hidden { display:none !important; }
+  #upiQr { max-width: 100%; height: auto; }
+  .ref-code {
+    font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700;
+    letter-spacing: .08em; margin: 2px 0 14px;
+  }
 </style>
 
 <main class="wrap">
   <a class="brand" href="/" aria-label="Mailwarden home">
     <span class="brand-tile" aria-hidden="true">
       <svg viewBox="0 0 100 100" fill="none" aria-hidden="true">
-          <path d="M50 8 L86 22 v30 c0 22-16 33-36 40C30 85 14 74 14 52 V22 Z"
-                stroke="currentColor" stroke-width="7"
-                stroke-linejoin="round" fill="none"/>
-          <path d="M32 40h36v22H32z" stroke="currentColor" stroke-width="6"
-                stroke-linejoin="round"/>
-          <path d="M33 41l15 12a4 4 0 0 0 4 0l15-12" stroke="currentColor"
-                stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <rect x="18" y="30" width="64" height="44" rx="8" stroke="currentColor" stroke-width="8"/>
+        <path d="M22 34l24 18a5 5 0 0 0 8 0l24-18" stroke="currentColor" stroke-width="8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
     </span>
     <span class="brand-word">mailwarden</span>
   </a>
@@ -84,7 +58,7 @@
     </ul>
 
     <div id="upiStep1">
-      <button class="btn" id="upiStart">Pay with UPI</button>
+      <button class="btn block" id="upiStart">Pay with UPI</button>
       <p class="muted" style="margin:12px 0 0; text-align:center">
         No card fee — the whole amount goes into building this.
         You will sign in with Google first, so we know which inbox the seat is for.
@@ -97,9 +71,8 @@
       <div style="margin:14px 0 2px"><span class="muted">Pay</span>
         <b style="font-size:1.4rem" id="upiAmount"></b></div>
       <div class="muted">Reference — keep this in the payment note</div>
-      <div id="upiRef" style="font-family:ui-monospace,monospace; font-size:1.5rem;
-           font-weight:700; letter-spacing:.06em; margin:2px 0 14px"></div>
-      <a class="btn" id="upiOpen" href="#">Open my UPI app</a>
+      <div id="upiRef" class="ref-code"></div>
+      <a class="btn block" id="upiOpen" href="#">Open my UPI app</a>
       <p class="muted" style="margin:14px 0 0">
         Scan from another phone, or tap the button on this one. Your seat is
         activated as soon as we see the payment — usually within a few hours.
@@ -140,7 +113,7 @@
   </p>
   <form class="card" id="waitForm" style="margin-top:12px">
     <input type="email" id="waitEmail" placeholder="you@gmail.com" required autocomplete="email" />
-    <button class="btn" type="submit" style="margin-top:12px">Request access</button>
+    <button class="btn block" type="submit" style="margin-top:12px">Request access</button>
     <p class="muted" id="waitMsg" style="margin:12px 0 0"></p>
   </form>
 

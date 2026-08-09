@@ -8,13 +8,7 @@
 <meta name="theme-color" content="#0a0a0a" />
 <link rel="stylesheet" href="/brand.css" />
 <style>
-  * { box-sizing:border-box; }
-  body {
-    margin:0; background:var(--bg); color:var(--text);
-    font:15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
-    -webkit-font-smoothing:antialiased;
-  }
-  .wrap { max-width:900px; margin:0 auto; padding:24px 20px 140px; }
+  .wrap { max-width:960px; margin:0 auto; padding:20px clamp(14px,4vw,20px) 150px; }
   header {
     display:flex; align-items:center; justify-content:space-between;
     margin-bottom:32px; gap:12px; flex-wrap:wrap;
@@ -36,10 +30,7 @@
     font-weight:640; letter-spacing:-0.015em; font-size:1.06rem; line-height:1;
   }
   .plan { font-size:.82rem; color:var(--muted); }
-  h1 { font-size:clamp(1.5rem, 4vw, 2.1rem); letter-spacing:-0.025em; margin:0 0 8px; line-height:1.2; }
   .sub { color:var(--muted); margin:0 0 28px; font-size:1.02rem; }
-  .hidden { display:none !important; }
-  a { color:var(--accent); }
 
   button {
     font:inherit; cursor:pointer; border-radius:10px; border:1px solid var(--border);
@@ -95,6 +86,17 @@
   .cat-num { font-size:clamp(1.9rem,6vw,2.6rem); font-weight:750; letter-spacing:-0.035em; margin:16px 0 2px; }
   .cat-sub { color:var(--muted); font-size:.92rem; }
   .cat-actions { display:flex; gap:9px; flex-wrap:wrap; margin-top:18px; }
+  @media (max-width:560px) {
+    .cat-actions { flex-direction:column; }
+    .cat-actions .big-btn { width:100%; }
+    .stat-row { grid-template-columns:1fr 1fr; }
+    .stat-row .stat:last-child { grid-column:1 / -1; }
+    /* The action tray is fixed to the bottom; on a phone its two halves must
+       stack or the buttons get pushed off the right edge. */
+    .tray-inner { flex-direction:column; align-items:stretch; gap:10px; }
+    .tray-inner > div:last-child { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .wrap { padding-bottom:190px; }
+  }
 
   details.senders-pick { margin-top:18px; border-top:1px solid var(--border); padding-top:14px; }
   details.senders-pick > summary {
@@ -158,9 +160,11 @@
   .tag.done { color:var(--safe); background:var(--accent-soft); font-weight:600; }
 
   .stat-row {
-    display:flex; gap:26px; flex-wrap:wrap; padding:16px 20px; margin-bottom:26px;
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:12px;
+    padding:14px 16px; margin-bottom:22px;
     background:var(--raised); border-radius:var(--radius);
   }
+  .stat .n { font-variant-numeric:tabular-nums; }
   .stat .n { font-size:1.35rem; font-weight:700; letter-spacing:-0.02em; }
   .stat .l { font-size:.8rem; color:var(--muted); }
 
@@ -194,13 +198,14 @@
   .card.selected { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
   .card.locked { opacity:.72; }
   .card-top { display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-  .name { font-weight:620; }
+  .name { font-weight:620; overflow-wrap:anywhere; }
   .tags { display:flex; gap:6px; flex-shrink:0; }
   .tag { font-size:.71rem; padding:2px 8px; border-radius:999px; background:var(--raised); color:var(--muted); white-space:nowrap; }
   .tag.protected { color:var(--safe); }
   .stats-line { color:var(--muted); font-size:.85rem; margin:4px 0 5px; }
   .reason { font-size:.85rem; color:var(--muted); margin-bottom:11px; }
   .actions { display:flex; gap:7px; flex-wrap:wrap; }
+  .actions button { flex:1 1 auto; min-width:132px; }
   .lock-note { font-size:.83rem; color:var(--safe); }
   .toolbar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
 
@@ -213,7 +218,7 @@
   /* display MUST NOT be set on the base rule — that overrides the UA's
      `display:none` for a closed <dialog>, so the empty shell renders inline at
      the bottom of the page. Only the [open] state gets a display value. */
-  dialog.reader { max-width:760px; max-height:86vh; padding:0; }
+  dialog.reader { max-width:760px; width:calc(100% - 24px); max-height:86vh; padding:0; }
   dialog.reader[open] { display:flex; flex-direction:column; }
   .reader-head {
     display:flex; align-items:center; justify-content:space-between; gap:12px;
@@ -263,14 +268,10 @@
     <button class="logo" id="goHome" title="Back to all categories">
       <span class="logo-tile" aria-hidden="true">
         <svg viewBox="0 0 100 100" fill="none" aria-hidden="true">
-          <path d="M50 8 L86 22 v30 c0 22-16 33-36 40C30 85 14 74 14 52 V22 Z"
-                stroke="currentColor" stroke-width="7"
-                stroke-linejoin="round" fill="none"/>
-          <path d="M32 40h36v22H32z" stroke="currentColor" stroke-width="6"
-                stroke-linejoin="round"/>
-          <path d="M33 41l15 12a4 4 0 0 0 4 0l15-12" stroke="currentColor"
-                stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <rect x="18" y="30" width="64" height="44" rx="8" stroke="currentColor" stroke-width="8"/>
+        <path d="M22 34l24 18a5 5 0 0 0 8 0l24-18" stroke="currentColor" stroke-width="8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
       </span>
       <span class="logo-word">mailwarden</span>
     </button>

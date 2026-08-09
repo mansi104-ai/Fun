@@ -1,135 +1,172 @@
 /*
- * BBI brand tokens — the single source of truth for Mailwarden's appearance.
+ * Mailwarden design system — monochrome, mobile-first.
  *
- * Previously every page carried its own :root block, so the palette existed in
- * four places and could drift in four directions. Everything visual now comes
- * from here.
+ * WHY NO SERIF, AND NO ACCENT COLOUR
  *
- * Palette from the BBI kit:
- *   #0A0A0A  ink        #FFFFFF  paper
- *   #2B2B2B  graphite   #E5E5E5  mist
- *   #D4AF37  gold       — the single accent
+ * Look at what actually ships in this category: Linear, Vercel, Notion, Height,
+ * Raycast, Stripe, Superhuman. Every one uses a single sans family and a
+ * near-monochrome palette. Nobody in productivity software sets headings in a
+ * display serif — Playfair and its relatives read as editorial, fashion, or
+ * wedding stationery, and on a tool they read as "someone chose a font" rather
+ * than "this is well built".
+ *
+ * The convergence is not laziness, it is that a utility earns trust by getting
+ * out of the way. So: one sans, one neutral ramp, and the only "colour" is
+ * contrast. The primary button is near-black on light and near-white on dark,
+ * which is exactly the Vercel/Linear pattern and needs no accent hue at all.
+ *
+ * Semantic colour survives in three places only, because these carry meaning
+ * that shape alone cannot: danger, warning, and safe.
  */
 
 :root {
-  /* ── Raw brand colours. Never referenced directly outside this file. ── */
-  --bbi-ink: #0a0a0a;
-  --bbi-paper: #ffffff;
-  --bbi-graphite: #2b2b2b;
-  --bbi-mist: #e5e5e5;
-  --bbi-gold: #d4af37;
+  /* ── Neutral ramp. Everything is built from these. ───────────────── */
+  --n-0: #ffffff;
+  --n-50: #fafafa;
+  --n-100: #f4f4f5;
+  --n-200: #e8e8e9;
+  --n-300: #d4d4d6;
+  --n-500: #71717a;
+  --n-700: #3f3f46;
+  --n-900: #18181b;
+  --n-950: #0a0a0a;
+
+  --bg: var(--n-50);
+  --surface: var(--n-0);
+  --raised: var(--n-100);
+  --border: var(--n-200);
+  --text: var(--n-950);
+  --muted: var(--n-500);
+
+  /* Contrast IS the accent. No hue required. */
+  --accent: var(--n-950);
+  --accent-fg: var(--n-0);
+  --accent-text: var(--n-950);
+  --accent-soft: var(--n-100);
+
+  --danger: #b42318;
+  --warn: #b54708;
+  --safe: #067647;
+
+  --brand-tile: var(--n-950);
+  --brand-ink: var(--n-0);
+
+  --radius: 12px;
+  --radius-sm: 9px;
 
   /*
-   * Gold fails contrast as TEXT on white — #D4AF37 on #FFFFFF is about 2:1,
-   * well under the 4.5:1 needed. It is excellent as a BACKGROUND with ink on
-   * top (~9.8:1). So the accent splits in two: a fill, and a darker bronze for
-   * accent text on light surfaces. Using the raw gold for link text would look
-   * on-brand and be unreadable.
+   * One family, system-first. Inter if the OS has it, otherwise the platform
+   * UI face — which is what GitHub, Basecamp and Notion ship. No webfont means
+   * no flash of unstyled text, no CSP exception, and nothing to download before
+   * the page is usable.
    */
-  --bbi-bronze: #7a5f14;
-
-  /* ── Light theme ─────────────────────────────────────────────────── */
-  --bg: #fbfbfa;
-  --surface: var(--bbi-paper);
-  --raised: #f4f3f0;
-  --border: var(--bbi-mist);
-  --text: var(--bbi-ink);
-  --muted: #6b6862;
-
-  --accent: var(--bbi-gold);        /* fills: buttons, highlights */
-  --accent-fg: var(--bbi-ink);      /* text ON an accent fill */
-  --accent-text: var(--bbi-bronze); /* accent-coloured TEXT */
-  --accent-soft: #fbf4de;
-
-  --danger: #a33b2a;
-  --warn: #8a6516;
-  --safe: #2f6b4f;
-
-  --brand-tile: var(--bbi-ink);
-  --brand-ink: var(--bbi-gold);
-
-  --radius: 14px;
-
-  /*
-   * Playfair Display is the BBI heading face. It is NOT loaded: the app's CSP
-   * is `default-src 'self'` with no font-src, so Google Fonts is blocked
-   * outright, and self-hosting needs the woff2 files committed to web/fonts/.
-   * Until then this stack falls back to a high-contrast serif with similar
-   * proportions. Drop the files in and the @font-face below starts working
-   * with no other change.
-   */
-  --font-display: "Playfair Display", "Iowan Old Style", "Palatino Linotype",
-    Palatino, Georgia, "Times New Roman", serif;
-  --font-body: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: var(--bbi-ink);
-    --surface: #151515;
-    --raised: var(--bbi-graphite);
-    --border: #333333;
-    --text: #f2f0ec;
-    --muted: #9c988f;
+    --bg: var(--n-950);
+    --surface: #131316;
+    --raised: #1c1c20;
+    --border: #27272a;
+    --text: #fafafa;
+    --muted: #a1a1aa;
 
-    /* On ink, the full gold clears 9:1 — no bronze substitute needed. */
-    --accent: var(--bbi-gold);
-    --accent-fg: var(--bbi-ink);
-    --accent-text: var(--bbi-gold);
-    --accent-soft: #2a2314;
+    --accent: #fafafa;
+    --accent-fg: var(--n-950);
+    --accent-text: #fafafa;
+    --accent-soft: #1c1c20;
 
-    --danger: #e2836f;
-    --warn: #d6a94a;
-    --safe: #6fae9b;
+    --danger: #fda29b;
+    --warn: #fec84b;
+    --safe: #75e0a7;
 
-    --brand-tile: var(--bbi-gold);
-    --brand-ink: var(--bbi-ink);
+    --brand-tile: #fafafa;
+    --brand-ink: var(--n-950);
   }
-}
-
-/*
- * Self-hosted display face. Inert until the files exist — a missing src makes
- * the browser fall through to the next family in --font-display rather than
- * render nothing. See web/brand/README.md for what to drop in.
- */
-@font-face {
-  font-family: "Playfair Display";
-  src: url("/fonts/playfair-display-600.woff2") format("woff2");
-  font-weight: 600;
-  font-display: swap;
 }
 
 /* ── Base ──────────────────────────────────────────────────────────── */
 
 * { box-sizing: border-box; }
 
+html { -webkit-text-size-adjust: 100%; }
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 16px/1.6 var(--font-body);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-h1, h2, .display {
-  font-family: var(--font-display);
-  font-weight: 600;
+/*
+ * Fluid type. clamp() means one rule covers 360px to 1440px without a stack of
+ * breakpoints, and the minimum is chosen so nothing ever wraps mid-word on a
+ * small phone. Tight tracking on large text is the single change that most
+ * makes an interface look considered rather than default.
+ */
+h1 {
+  font-size: clamp(1.6rem, 6vw, 2.35rem);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  font-weight: 680;
+  margin: 0 0 12px;
+}
+h2 {
+  font-size: clamp(1.05rem, 3.2vw, 1.25rem);
+  line-height: 1.3;
   letter-spacing: -0.015em;
+  font-weight: 640;
+  margin: 32px 0 10px;
+}
+h3 { font-size: 1rem; font-weight: 630; letter-spacing: -0.01em; margin: 0 0 8px; }
+p { margin: 0 0 14px; }
+
+a { color: var(--accent-text); text-underline-offset: 2px; }
+
+/* Never let a long address or reference force the page to scroll sideways. */
+.break { overflow-wrap: anywhere; }
+
+/* ── Layout ────────────────────────────────────────────────────────── */
+
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  /* Generous on desktop, tight on a phone where every pixel of width counts. */
+  padding: clamp(24px, 6vw, 56px) clamp(16px, 5vw, 24px) 80px;
+}
+.wrap.wide { max-width: 960px; }
+
+.lede {
+  font-size: clamp(1rem, 3.4vw, 1.12rem);
+  color: var(--muted);
+  margin: 0 0 28px;
 }
 
-a { color: var(--accent-text); }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: clamp(16px, 4.5vw, 22px);
+  margin-bottom: 14px;
+}
+
+.muted { color: var(--muted); font-size: .9rem; }
+.hidden { display: none !important; }
 
 /* ── Brand lockup ──────────────────────────────────────────────────── */
-/*
- * The BBI kit renders Mailwarden with a shield, not an envelope — "warden"
- * is the half of the name doing the work, and the shield is what the product
- * actually promises. The envelope now sits inside it.
- */
+
 .brand {
   display: flex;
   width: fit-content;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   color: var(--text);
   text-decoration: none;
   background: none;
@@ -140,50 +177,77 @@ a { color: var(--accent-text); }
 .brand-tile {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
   background: var(--brand-tile);
   color: var(--brand-ink);
   flex-shrink: 0;
 }
-.brand-tile svg { width: 26px; height: 26px; display: block; }
+.brand-tile svg { width: 24px; height: 24px; display: block; }
 .brand-word {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 1.22rem;
-  letter-spacing: -0.01em;
+  font-weight: 660;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
 }
 
-/* ── Shared controls ───────────────────────────────────────────────── */
+/* ── Controls ──────────────────────────────────────────────────────── */
 
 .btn {
-  display: inline-block;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: var(--accent);
   color: var(--accent-fg);
-  padding: 14px 24px;
-  border-radius: 12px;
-  border: 0;
+  padding: 13px 22px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
   font: inherit;
-  font-weight: 650;
+  font-weight: 620;
+  font-size: .98rem;
   cursor: pointer;
   text-decoration: none;
+  /* 44px is the minimum comfortable touch target. */
+  min-height: 44px;
 }
-.btn:hover:not(:disabled) { filter: brightness(1.06); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:hover:not(:disabled) { opacity: .88; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn.ghost {
   background: none;
-  color: var(--accent-text);
-  border: 1px solid var(--border);
+  color: var(--text);
+  border-color: var(--border);
 }
+.btn.ghost:hover:not(:disabled) { background: var(--raised); opacity: 1; }
+.btn.block { width: 100%; }
 
-.card {
+input, select, textarea {
+  font: inherit;
+  /* 16px minimum: anything smaller makes iOS Safari zoom the whole page on
+     focus, which is the most common way a form feels broken on a phone. */
+  font-size: 16px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 22px;
+  color: var(--text);
+  min-height: 44px;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible,
+button:focus-visible, a:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 
-.muted { color: var(--muted); font-size: .92rem; }
-.hidden { display: none !important; }
+/* ── Small screens ─────────────────────────────────────────────────── */
+
+@media (max-width: 560px) {
+  /* Side-by-side buttons become a stack; a 48%-wide button with wrapped text
+     is worse than a full-width one. */
+  .btn { width: 100%; }
+  .btn-row { flex-direction: column; align-items: stretch; }
+  h2 { margin-top: 26px; }
+}
+
+/* Wide content must scroll inside its own box, never move the page. */
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }

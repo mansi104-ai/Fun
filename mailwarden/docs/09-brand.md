@@ -1,144 +1,166 @@
-# BBI brand — as applied to Mailwarden
+# Mailwarden design system
 
-Mailwarden is a product of **BBI** (Building · Creating · Impacting), the
-personal brand of a solo founder building in public.
+Mailwarden is a product of **BBI** (Building · Creating · Impacting).
 
-The machine-readable version of everything below is
-[`web/brand.css`](../web/brand.css). That file is the source of truth; this
-document explains the decisions it encodes.
+The machine-readable version is [`web/brand.css`](../web/brand.css) — one file,
+one source of truth. This document explains the decisions it encodes.
+
+> **Note on the BBI parent brand.** The BBI kit uses Playfair Display and a gold
+> accent (`#D4AF37`). Both were tried in Mailwarden and both were reverted. The
+> reasons are below. BBI keeps its own identity; the product does not have to
+> wear it, and shouldn't.
 
 ---
 
-## Colour
+## 1. Monochrome, no accent hue
 
-| Token | Hex | Role |
+| Token | Light | Dark |
 |---|---|---|
-| Ink | `#0A0A0A` | Page ground in dark, brand tile in light |
-| Paper | `#FFFFFF` | Surfaces in light |
-| Graphite | `#2B2B2B` | Raised surfaces in dark |
-| Mist | `#E5E5E5` | Borders in light |
-| **Gold** | **`#D4AF37`** | The single accent |
+| Background | `#FAFAFA` | `#0A0A0A` |
+| Surface | `#FFFFFF` | `#131316` |
+| Text | `#0A0A0A` | `#FAFAFA` |
+| Muted | `#71717A` | `#A1A1AA` |
+| **Primary button** | near-black on white | near-white on black |
 
-### The one adjustment I made, and why
+**Contrast is the accent.** The primary button is simply the inverse of the
+page, which is what Linear, Vercel and Notion all do. It needs no hue, it can
+never fail a contrast check, and it makes the *content* the most colourful
+thing on screen.
 
-**Gold cannot be used as text on white.** `#D4AF37` on `#FFFFFF` is roughly
-**2:1** contrast, against the 4.5:1 minimum — legible to some people in some
-light, and invisible to others. It is excellent as a *fill* with ink on top
-(~9.8:1).
+Semantic colour survives in exactly three places, because these carry meaning
+that shape alone cannot: `--danger`, `--warn`, `--safe`.
 
-So the accent splits in two:
+### Why the gold came out
 
-```css
---accent:      #D4AF37   /* fills — buttons, highlights */
---accent-fg:   #0A0A0A   /* text ON a gold fill */
---accent-text: #7A5F14   /* accent-coloured TEXT on light surfaces */
+`#D4AF37` on white is roughly **2:1** contrast against a 4.5:1 minimum. Every
+use as text needed a darker bronze substitute, so the "one accent" was really
+two colours that had to be kept in sync. Gold also reads as luxury/finance —
+a jarring signal on a tool whose promise is *not losing your receipts*.
+
+---
+
+## 2. One sans family, no webfont
+
+```
+Inter → -apple-system → Segoe UI → Roboto → Helvetica Neue → Arial
 ```
 
-On ink, gold text clears 9:1, so `--accent-text` becomes the full gold in dark
-mode. Links and small accent text stay readable in both themes without ever
-looking off-brand.
+### Why no serif
+
+Look at what actually ships in this category — Linear, Vercel, Notion, Height,
+Raycast, Stripe, Superhuman. Every one uses a single sans family. **Nobody in
+productivity software sets UI headings in a display serif.** Playfair and its
+relatives read as editorial, fashion, or wedding stationery; on a tool they read
+as "someone picked a font" rather than "this is well built".
+
+That convergence isn't laziness. A utility earns trust by getting out of the
+way, and a distinctive display face does the opposite.
+
+### Why no webfont at all
+
+- The CSP is `default-src 'self'` with no `font-src`, so Google Fonts is blocked
+  outright — and that policy already caught a real production bug. Punching a
+  hole in it for typography is a bad trade.
+- Self-hosting means a download before the page is readable, plus a flash of
+  fallback text.
+- The system stack is what GitHub, Basecamp and Notion ship. It is instant and
+  it looks native on every platform.
+
+**Type is carried by scale and spacing, not by the family.** Tight tracking on
+large headings (`-0.025em`) and a 1.6 body line-height do almost all the work
+of making an interface look considered.
 
 ---
 
-## Type
+## 3. The mark
 
-| Role | Face |
-|---|---|
-| Headings | Playfair Display, 600 |
-| Body | Inter |
+A **white envelope on a near-black tile**, wordmark lowercase.
 
-### Playfair is not currently loading
-
-The app's CSP is `default-src 'self'` with **no `font-src`**, so Google Fonts is
-blocked outright. Loosening the CSP for a webfont would weaken the policy that
-already caught one real bug, so the fix is to self-host.
-
-`brand.css` already contains the `@font-face` rule pointing at
-`/fonts/playfair-display-600.woff2`. **Drop that file in and it starts working
-with no other change** — a missing `src` makes the browser fall through to the
-next family rather than render nothing.
-
-Until then headings use a high-contrast serif fallback (Iowan Old Style →
-Palatino → Georgia), which holds the same editorial feel.
-
-Get the file from <https://fonts.google.com/specimen/Playfair+Display> →
-Download family → convert the 600 weight to woff2 → `web/fonts/`.
+A shield was tried, following the BBI kit's Mailwarden card. It was reverted:
+a shield alone reads as a security badge or a VPN, and the product has to say
+"mail" before it says anything else. The envelope is instantly legible at 16px,
+which is the only size that really matters for a favicon.
 
 ---
 
-## The mark
+## 4. Mobile
 
-The BBI kit shows Mailwarden as a **shield**, not an envelope. That is the
-better mark and I switched to it:
+Mobile-first, verified by measuring rather than by eye:
 
-- "**Warden**" is the half of the name doing the work.
-- A shield is what the product actually promises — nothing important gets
-  deleted, everything is reversible.
-- An envelope alone says "email client", which Mailwarden is not.
+- **Fluid type** via `clamp()` — one rule from 360px to 1440px, no breakpoint
+  stack, and a minimum chosen so nothing wraps mid-word on a small phone.
+- **44px minimum touch targets** on every button and input.
+- **16px minimum input font size.** Anything smaller makes iOS Safari zoom the
+  whole page on focus, which is the most common way a form feels broken.
+- **Buttons go full-width below 560px.** A 48%-wide button whose label wraps to
+  two lines is worse than a full-width one.
+- **Wide content scrolls inside its own box** (`.scroll-x`), never the page.
+- **`overflow-wrap: anywhere`** on sender addresses and payment references,
+  which are the strings long enough to force horizontal scroll.
 
-The envelope now sits *inside* the shield, so the mark still reads as mail at a
-glance. Wordmark is **lowercase** `mailwarden`, per the kit's application
-examples.
+### A bug worth remembering
+
+The landing page's email input rendered **240px tall** on mobile. The cause:
+
+```css
+.signup input { flex: 1 1 240px; }              /* width, in a row */
+@media (max-width:560px) { .signup { flex-direction: column; } }
+```
+
+`flex-basis` follows the **main axis**. The moment the container became a
+column, `240px` stopped meaning width and started meaning height. Fixed by
+resetting `flex` explicitly inside the media query.
+
+It was invisible in a plain headless screenshot and obvious the second the
+element was measured — which is why layout verification now reads
+`scrollWidth` vs `clientWidth` and element heights, instead of relying on a
+picture.
 
 ---
 
-## Voice
+## 5. Voice
 
-From the kit, and worth holding to because the product's entire pitch is trust:
+From the BBI kit, and worth keeping because the product's whole pitch is trust:
 
-| | |
-|---|---|
-| **Personal & Authentic** | Real, transparent, human |
-| **Curious & Creative** | Always learning, building, improving |
-| **Builder Mindset** | From ideas to products that solve real problems |
-| **Impact Driven** | Creating value for users and the world |
+**Personal & Authentic · Curious & Creative · Builder Mindset · Impact Driven**
+*Minimal · Focused · Builder · Reliable · Thoughtful*
 
-Keywords: *Minimal · Focused · Builder · Reliable · Thoughtful*
-
-### What this means in copy, concretely
-
-Mailwarden's copy already follows this, and it should keep doing so:
+In practice that means three habits the copy already follows:
 
 - **Admit limits out loud.** "Only 100 seats" works *because* the page explains
   Google imposed the cap. "UPI cannot take international cards" is stated on the
-  pricing page rather than discovered at checkout. A limitation admitted is
-  worth more than a benefit claimed.
-- **Never claim a success you did not have.** The unsubscribe engine says which
-  mechanism it used and what it could not do. Undo reports mismatches instead of
-  counting them as restored.
+  pricing page rather than discovered at checkout. A limitation admitted buys
+  more trust than a benefit claimed.
+- **Never claim a success you did not have.** The unsubscribe engine reports
+  which mechanism it used and what it could not do. Undo reports mismatches
+  instead of counting them as restored.
 - **No vendor names in product copy.** Users cannot perceive which model ran;
   they can perceive what it did. "Two-pass classification — every ambiguous
   sender gets a second, deeper review" survives a change of provider.
 
-Tagline, from the kit: **Clean inbox. Clear mind. More focus.**
+Tagline: **Clean inbox. Clear mind. More focus.**
 
 ---
 
-## Still missing
+## 6. Still missing
 
-I cannot produce raster files, so these need exporting from the original
-artwork and dropping into `web/brand/`:
+Raster files cannot be produced here; export from the original artwork into
+`web/brand/`:
 
 | File | Size | Cost of not having it |
 |---|---|---|
-| `og.png` | 1200×630 | Every link shared to Twitter/LinkedIn/Slack renders with no preview image — directly costs clicks on launch posts |
+| `og.png` | 1200×630 | Every shared link renders with no preview image — directly costs clicks on launch posts |
 | `apple-touch-icon.png` | 180×180 | iOS home screen falls back to a screenshot |
-| `playfair-display-600.woff2` | — | Headings use a fallback serif |
-
-The brand-kit image itself also lives outside the repo; this document and
-`brand.css` are its canonical form here.
 
 ---
 
-## Domain
+## 7. mailwarden.ai
 
-The kit lists **mailwarden.ai**. Production currently runs on
-`mailwarden.fly.dev`. When the domain is pointed at Fly, three things must
-change together:
+Production runs on `mailwarden.fly.dev`. When the domain is pointed at Fly,
+three things must change **together**:
 
 1. `flyctl certs add mailwarden.ai`
 2. `flyctl secrets set APP_URL=https://mailwarden.ai`
 3. Google Cloud → Credentials → add `https://mailwarden.ai/auth/google/callback`
-   as an authorised redirect URI
 
 Miss the third and OAuth breaks with `redirect_uri_mismatch` for everyone.
