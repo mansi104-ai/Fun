@@ -30,6 +30,72 @@ say exactly why on the page.
 
 ---
 
+## Step 0 — how much you actually lose to fees
+
+Measured against the funding target of ~$1,800 (37 founding seats at $49):
+
+| Method | Fee per $49 seat | Total on 37 sales | Setup cost |
+|---|---|---|---|
+| **UPI (India)** | **₹0** | **₹0** | none |
+| Stripe / Razorpay India | ~2% + 18% GST on the fee | ~$50 | GST registration, current account, business docs |
+| Stripe (US rates) | $1.72 (3.5%) | ~$64 | US entity — Stripe Atlas is $500 |
+| Lemon Squeezy / Paddle | $2.95 (6%) | ~$109 | none; they are merchant of record |
+
+**The spread between card processors is about $50 across your entire funding
+target.** That is not worth optimising. Pick whichever you can actually open an
+account with fastest.
+
+**UPI is the real saving, and it is 100%.** It has zero merchant discount rate
+in India by regulation.
+
+### Why manual UPI works here and normally would not
+
+Manual payment means you confirm each one by hand, which is usually a bad trade.
+It is fine here for one specific reason: **every buyer must already be added to
+the Google Test users list manually.** You are in the loop for all 100 sales
+whether you like it or not, so reconciling a UPI reference adds seconds to a
+step that already exists.
+
+This stops making sense the moment you outgrow the 100-seat cap — which is
+exactly the point where Stripe's automation starts earning its 3.5%.
+
+### Setting up UPI
+
+```bash
+flyctl secrets set --app mailwarden \
+  DIRECT_UPI_ID=yourname@okhdfcbank \
+  DIRECT_PAYEE_NAME="Mailwarden" \
+  DIRECT_PAY_INR=4200 \
+  ADMIN_EMAIL=6monthslearning.mansi@gmail.com
+```
+
+The pricing page shows the UPI section only once `DIRECT_UPI_ID` is set —
+before that it stays hidden, because advertising a payment channel that is not
+configured fails *after* the buyer has already decided to pay.
+
+Keep `DIRECT_PAY_INR` roughly in step with $49, or simply price in INR for
+Indian buyers and treat them as a separate segment.
+
+### Granting a seat after a UPI payment
+
+Signed in as `ADMIN_EMAIL`:
+
+```bash
+curl -X POST https://mailwarden.fly.dev/api/billing/grant \
+  -H 'Content-Type: application/json' \
+  -b 'mw_session=YOUR_SESSION_COOKIE' \
+  -d '{"email":"buyer@gmail.com","plan":"founding","reference":"UPI ref 402511…"}'
+```
+
+The buyer must have signed in at least once first, so there is an account to
+attach the plan to. Both sides are written to the audit log with the payment
+reference — if a purchase is ever disputed, that log is the only evidence there
+is, so always pass a real reference.
+
+**`ADMIN_EMAIL` unset means nobody can grant, not everybody.** Tests enforce it.
+
+---
+
 ## Step 1 — Stripe (about 20 minutes)
 
 1. Create an account at <https://dashboard.stripe.com/register>. Business
