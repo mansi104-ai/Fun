@@ -1,3 +1,4 @@
+import os
 import json
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,11 @@ from ocr_table import extract_table_from_image, tesseract_ready
 # app restarts / new browser sessions, no login/auth involved).
 # ---------------------------------------------------------------------------
 APP_DIR = Path(__file__).parent
-DATA_DIR = APP_DIR / "app_data"
+# On a host with a real disk attached (see fly.toml), SCL_DATA_DIR points at
+# the mounted volume so uploads outlive restarts and redeploys. Unset -- running
+# locally, or on Streamlit Community Cloud -- it falls back to a folder beside
+# this file, exactly as before.
+DATA_DIR = Path(os.environ.get("SCL_DATA_DIR") or (APP_DIR / "app_data"))
 IMAGES_DIR = DATA_DIR / "images"
 EXCEL_DIR = DATA_DIR / "excel"
 LOG_FILE = DATA_DIR / "processed_log.json"

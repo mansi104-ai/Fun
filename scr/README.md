@@ -43,13 +43,51 @@ Open the URL Streamlit prints (usually http://localhost:8501).
 
 ## Persistence
 
-Everything lives under `app_data/` next to `app.py`:
-- `app_data/excel/` — the Excel file
-- `app_data/images/` — all uploaded images
-- `app_data/processed_log.json` — which images have already been OCR'd
+Three things are kept on disk:
+- `excel/` — the Excel file
+- `images/` — all uploaded images
+- `processed_log.json` — which images have already been OCR'd
 
-As long as this folder isn't deleted, your data survives app restarts and
-new browser sessions — no accounts needed.
+Where that disk is depends on how the app is running:
+
+| Running on | Location | Survives a redeploy? |
+|---|---|---|
+| Your machine | `app_data/` next to `app.py` | Yes |
+| Fly.io | `/data`, a mounted volume | **Yes** |
+| Streamlit Community Cloud | `app_data/` in the container | **No** |
+
+`SCL_DATA_DIR` selects the location; unset, it falls back to `app_data/`.
+
+Community Cloud rebuilds its container from the repo every time you push, and
+gives no disk to attach, so anything uploaded there is gone after the next
+deploy and has to be re-uploaded. That is the reason for the Fly deployment
+below — nothing else about the app differs.
+
+## Deploying
+
+### Fly.io (persistent — recommended)
+
+```bash
+cd scr
+fly deploy --ha=false
+```
+
+The `Dockerfile` installs Tesseract and OpenCV's one system library, and
+`fly.toml` mounts the `scl_ocr_data` volume at `/data`. `--ha=false` matters:
+one volume attaches to one machine, and Streamlit keeps each session's state
+in the process serving it, so a second machine would be a second unshared copy
+of the app rather than extra capacity.
+
+The machine suspends when nobody is using it and resumes in a second or two,
+so it only costs while in use. The volume persists either way.
+
+### Streamlit Community Cloud (no persistence)
+
+Point it at `scr/app.py`. One gotcha: `packages.txt` must be in the **root of
+the repository**, not in this folder — unlike `requirements.txt`, Community
+Cloud does not search upwards from the app file for it. There is one at the
+repo root listing `tesseract-ocr`; without it the app starts, imports
+pytesseract, and then fails on the first image with `TesseractNotFoundError`.
 
 ## Notes / limitations
 

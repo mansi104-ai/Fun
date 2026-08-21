@@ -1,0 +1,7 @@
+app_data
+__pycache__
+**/__pycache__
+*.pyc
+*.xlsx
+README.md
+.git

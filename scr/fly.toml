@@ -1,0 +1,48 @@
+# Fly.io deployment for the Table OCR app.
+#
+#   cd scr
+#   fly deploy --ha=false
+#
+# Why here and not Streamlit Community Cloud: this app keeps your uploaded
+# workbook, your stored images and the processed-image log on disk. Community
+# Cloud rebuilds its container from the repo on every deploy, so all three are
+# lost each time. The volume below is a real disk that survives restarts and
+# redeploys.
+#
+# --ha=false is not optional. One volume attaches to one machine, and Streamlit
+# holds each session's state in the process serving it, so a second machine
+# would be a second unshared copy of the app rather than extra capacity.
+
+app = "scl-table-ocr"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[mounts]]
+  source = "scl_ocr_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Occasional-use tool: pay for it only while it is in use. An open browser tab
+  # holds a websocket, which counts as activity, so it stays up while the page
+  # is in front of you. "suspend" resumes in a second or two, where a cold
+  # "stop" would make the first visitor wait out a full Streamlit boot.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "25s"
+    method = "GET"
+    path = "/_stcore/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  # OpenCV, pandas and Streamlit together idle in the low hundreds of MB before
+  # a single image is decoded, so 512mb leaves little room for the OCR pass.
+  memory = "1gb"
