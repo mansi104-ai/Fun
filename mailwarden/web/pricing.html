@@ -1,3 +1,6 @@
+<!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Mailwarden — Founding 100</title>
@@ -15,7 +18,52 @@
 <meta property="og:image:height" content="630" />
 <meta property="og:image:alt" content="Mailwarden wordmark on black, over the line “Clean your Gmail. Without losing what matters.” and three tags: Safe, Review, Protected." />
 <meta name="twitter:card" content="summary_large_image" />
+<link rel="canonical" href="https://mailwarden.fly.dev/pricing.html" />
 <link rel="stylesheet" href="/brand.css" />
+<!-- Structured data. A ld+json block is a CSP "data block": the browser
+     never executes it, so script-src does not apply and no inline-script
+     exception is needed. smoke.ts checks it parses as JSON. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Product",
+  "name": "Mailwarden",
+  "url": "https://mailwarden.fly.dev/pricing.html",
+  "image": "https://mailwarden.fly.dev/brand/og.png",
+  "description": "Sender-level Gmail cleanup that archives and never permanently deletes.",
+  "brand": {
+    "@type": "Brand",
+    "name": "Mailwarden"
+  },
+  "offers": [
+    {
+      "@type": "Offer",
+      "name": "Founding 100",
+      "price": "49.00",
+      "priceCurrency": "USD",
+      "url": "https://mailwarden.fly.dev/pricing.html",
+      "availability": "https://schema.org/LimitedAvailability"
+    },
+    {
+      "@type": "Offer",
+      "name": "Starter",
+      "price": "19.00",
+      "priceCurrency": "USD",
+      "url": "https://mailwarden.fly.dev/pricing.html",
+      "availability": "https://schema.org/PreOrder"
+    },
+    {
+      "@type": "Offer",
+      "name": "Pro",
+      "price": "39.00",
+      "priceCurrency": "USD",
+      "url": "https://mailwarden.fly.dev/pricing.html",
+      "availability": "https://schema.org/PreOrder"
+    }
+  ]
+}
+</script>
+
 <style>
   .brand { margin-bottom: 28px; }
   .card.hero { border-color: var(--text); }
@@ -38,6 +86,8 @@
   }
 </style>
 
+</head>
+<body>
 <main class="wrap">
   <a class="brand" href="/" aria-label="Mailwarden home">
     <span class="brand-tile" aria-hidden="true">
@@ -83,7 +133,7 @@
     </ul>
 
     <div id="upiStep1">
-      <button class="btn block" id="upiStart">Pay with UPI</button>
+      <button class="btn block" id="upiStart" data-evt="plan_select">Pay with UPI</button>
       <p class="muted" style="margin:12px 0 0; text-align:center">
         No card fee. You sign in with Google first, so we know which inbox the seat is for.
       </p>
@@ -132,7 +182,7 @@
       Card checkout is <span id="intlState">not open yet</span> — leave your address
       below and we will write the moment it is.
     </p>
-    <button class="btn ghost hidden" id="buyFounding">Pay by card</button>
+    <button class="btn ghost hidden" id="buyFounding" data-evt="plan_select">Pay by card</button>
   </div>
 
   <h2>Not able to sign in yet?</h2>
@@ -157,4 +207,7 @@
   </p>
 </main>
 
+<script src="/analytics.js" defer></script>
 <script type="module" src="/pricing.js"></script>
+</body>
+</html>

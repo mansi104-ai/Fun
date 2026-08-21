@@ -5,9 +5,11 @@ import cookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import { config } from "./config.js";
 import { authRoutes } from "./routes/auth.js";
+import { analyticsRoutes } from "./routes/analytics.js";
 import { apiRoutes } from "./routes/api.js";
 import { billingRoutes } from "./routes/billing.js";
 import { demoRoutes } from "./routes/demo.js";
+import { pruneWebEvents } from "./analytics.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(here, "../../web");
@@ -77,6 +79,17 @@ await app.register(authRoutes);
 await app.register(demoRoutes);
 await app.register(apiRoutes);
 await app.register(billingRoutes);
+await app.register(analyticsRoutes);
+
+/**
+ * Analytics retention, enforced by the app rather than by remembering to run
+ * something. `unref` so a pending timer never holds the process open during a
+ * deploy — Fly stops containers on a clock, and a hung shutdown reads as a
+ * failed release.
+ */
+const pruned = pruneWebEvents();
+if (pruned > 0) app.log.info(`[analytics] pruned ${pruned} events past retention`);
+setInterval(() => pruneWebEvents(), 24 * 60 * 60 * 1000).unref();
 
 app.get("/app", (_req, reply) => reply.sendFile("app.html"));
 

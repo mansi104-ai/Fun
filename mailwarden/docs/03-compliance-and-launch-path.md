@@ -90,6 +90,29 @@ Prepare before applying — incomplete applications are the main cause of multi-
 - [ ] The word "Google" used per brand guidelines; no implication of Google endorsement
 - [ ] In-app account deletion that revokes the token and purges data
 
+## 6. First submission — what Google actually rejected
+
+Submitted and rejected with three findings. The checklist above predicted all
+three; two are now fixed in code and enforced by smoke §20.
+
+| Google's finding | Status |
+|---|---|
+| *"The website of your homepage URL `https://mailwarden.fly.dev` is not registered to you."* | **Open — needs a purchase.** A `*.fly.dev` subdomain is registered to Fly.io. Buy the domain, then `node scripts/set-domain.mjs https://mailwarden.ai` and the five manual steps in docs/09 §7. |
+| *"Your homepage does not explain the purpose of your app."* | **Fixed.** The homepage now carries *What Mailwarden does*, *How it works*, a per-scope justification quoting the full scope strings, *What Mailwarden will not touch*, and the Limited Use citation. |
+| *"The app name configured for your OAuth consent screen does not match the app name on your homepage."* | **Fixed.** The page led with the tagline and carried the name only in the lowercase wordmark and in body copy. `Mailwarden` is now the first text in the `<h1>`, verbatim and identical to the consent screen and the `<title>`. |
+
+Smoke §20 now fails the build if the homepage stops naming the app in its
+`<h1>`, stops explaining what the app does, drops the privacy-policy link or the
+Limited Use citation, or — the valuable one — if a scope is added to
+`config.google.scopes` without being disclosed on the homepage that justifies
+it. A consent screen and a homepage that disagree is exactly what costs another
+six-week cycle.
+
+**If it is rejected a second time on the name**, the next lever is the wordmark:
+it is lowercase `mailwarden` by deliberate brand decision (docs/09 §3), while
+the consent screen says `Mailwarden`. Changing one of the two to match is a
+brand call, not an engineering one.
+
 ## Sources
 - [Restricted scope verification — Google](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
 - [Gmail OAuth scopes 3-tier system — Bright Softwares](https://bright-softwares.com/blog/en/google-workspace/gmail-oauth-scopes-decoded-the-3-tier-system-that-determines-your-launch-path)

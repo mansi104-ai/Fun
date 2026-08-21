@@ -22,6 +22,7 @@ import { db } from "./db.js";
 import { planBatch } from "./gmail/executor.js";
 import { aggregateSenders } from "./gmail/sync.js";
 import { isPubliclyRoutable, parseTargets } from "./gmail/unsubscribe.js";
+import { analyticsSummary, recordWebEvent } from "./analytics.js";
 import { newId } from "./lib/crypto.js";
 import { sendersInState } from "./overview.js";
 import { config } from "./config.js";
@@ -971,10 +972,44 @@ for (const [pattern, label] of forbidden) {
  * module. Status codes cannot catch this; a source check can.
  */
 const webDir = path.resolve(srcRoot, "../../web");
-const inlineScript = /<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/;
+
+/**
+ * `application/ld+json` is exempt, and only that.
+ *
+ * CSP calls a <script> whose type is not JavaScript a "data block": the browser
+ * never executes it, so script-src does not apply and structured data needs no
+ * 'unsafe-inline'. The exemption is an exact string match rather than "any
+ * script carrying a type attribute", so an inline `type="module"` block is
+ * still caught by the same rule that caught the original bug.
+ */
+const LD_JSON_OPEN = '<script type="application/ld+json">';
+const scriptOpen = /<script(?![^>]*\bsrc=)[^>]*>/g;
+
 for (const file of readdirSync(webDir).filter((f) => f.endsWith(".html"))) {
   const html = readFileSync(path.join(webDir, file), "utf8");
-  check(`web/${file} has no inline <script>`, !inlineScript.test(html));
+  const executable = [...html.matchAll(scriptOpen)].filter((m) => m[0] !== LD_JSON_OPEN);
+  check(`web/${file} has no inline <script>`, executable.length === 0,
+    executable.map((m) => m[0]).join(" "));
+}
+
+/**
+ * Structured data that does not parse is worse than none: Google discards the
+ * whole block silently, so the page looks perfect and the rich result simply
+ * never appears. A typo in a hand-edited JSON-LD island is invisible without
+ * a check like this one.
+ */
+for (const file of readdirSync(webDir).filter((f) => f.endsWith(".html"))) {
+  const html = readFileSync(path.join(webDir, file), "utf8");
+  for (const m of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) {
+    let parsed: { "@type"?: unknown } | null = null;
+    try {
+      parsed = JSON.parse(m[1]!) as { "@type"?: unknown };
+    } catch {
+      parsed = null;
+    }
+    check(`web/${file} ld+json parses and declares @type`,
+      parsed !== null && typeof parsed["@type"] === "string");
+  }
 }
 
 // Any script the pages DO reference must actually exist, or the app is equally
@@ -1062,6 +1097,271 @@ const mutators = sources.filter(
 );
 check("batchModify is called from executor.ts only", mutators.length === 0,
   mutators.map((m) => path.basename(m.file)).join(", "));
+
+// ── 18. Analytics: what it records, and what it must never record ────────
+
+section("18. Analytics: the endpoint is public, so its limits are the security");
+
+/**
+ * `/api/e` accepts writes from anyone on the internet with no account and no
+ * session — it has to, because it fires on the landing page. Everything that
+ * makes that safe is a rule inside recordWebEvent, and a rule with no test is
+ * a rule that silently stops applying.
+ *
+ * The privacy page makes specific, checkable claims about this table. These
+ * checks are what keep that page from becoming a false statement.
+ */
+{
+  const firstNewId =
+    ((db.prepare(`SELECT COALESCE(MAX(id), 0) AS m FROM web_events`).get() as { m: number }).m) + 1;
+
+  const ev = (over: Partial<Parameters<typeof recordWebEvent>[0]> = {}) =>
+    recordWebEvent({
+      name: "pageview",
+      path: "/",
+      query: "",
+      referrer: "",
+      ip: "203.0.113.9",
+      userAgent: "smoke/1.0",
+      selfHost: "mailwarden.fly.dev",
+      ...over,
+    });
+
+  const rowsSince = () =>
+    db
+      .prepare(`SELECT * FROM web_events WHERE id >= ? ORDER BY id`)
+      .all(firstNewId) as Record<string, unknown>[];
+
+  check("An event name off the allowlist is refused", ev({ name: "drop_table" }) === false);
+  check("A name on the allowlist is accepted", ev({ name: "invite_ok" }) === true);
+
+  // Unbounded path cardinality is how a public endpoint turns a dashboard into
+  // a wall of attacker-chosen strings.
+  ev({ path: "/../../etc/passwd?x=1" });
+  check("An unknown path collapses to \"other\"",
+    rowsSince().some((r) => r.path === "other"));
+  check("No row stores an unlisted path verbatim",
+    rowsSince().every((r) => typeof r.path === "string" && !String(r.path).includes("passwd")));
+
+  // A full referrer URL can carry somebody's private path. Only the host is
+  // acquisition data; the rest is theirs.
+  ev({ referrer: "https://news.ycombinator.com/item?id=12345&secret=abc" });
+  const referred = rowsSince().filter((r) => r.referrer_host !== null);
+  check("A referrer is reduced to its host",
+    referred.some((r) => r.referrer_host === "news.ycombinator.com"));
+  check("No referrer path or query is retained",
+    referred.every((r) => !String(r.referrer_host).includes("/")
+      && !String(r.referrer_host).includes("secret")));
+
+  // Our own pages linking to each other is navigation, not a referral.
+  ev({ referrer: "https://mailwarden.fly.dev/pricing.html", path: "/terms.html" });
+  const selfRef = rowsSince().find((r) => r.path === "/terms.html");
+  check("A same-origin referrer is dropped", selfRef?.referrer_host === null);
+
+  ev({ query: "?utm_source=Hacker%20News<script>&utm_medium=x", path: "/pricing.html" });
+  const utm = rowsSince().find((r) => r.utm_source !== null);
+  check("utm_source is reduced to a slug",
+    typeof utm?.utm_source === "string" && /^[a-z0-9_.-]+$/.test(String(utm.utm_source)),
+    String(utm?.utm_source));
+
+  /**
+   * The load-bearing privacy claim. The IP and user agent are hashed into the
+   * visitor id and discarded; if either ever reaches a column, the privacy page
+   * is wrong and the data becomes something we would have to disclose.
+   */
+  const columns = (db.prepare(`PRAGMA table_info(web_events)`).all() as { name: string }[])
+    .map((c) => c.name);
+  check("web_events has no column for an IP or user agent",
+    !columns.some((c) => /ip|address|agent|ua\b/i.test(c)), columns.join(","));
+  check("No stored value contains the IP or user agent we passed in",
+    rowsSince().every((r) =>
+      !Object.values(r).some((v) => typeof v === "string"
+        && (v.includes("203.0.113") || v.includes("smoke/1.0")))));
+
+  // Visitor identity: same device is one visitor, a different device is another.
+  const before = rowsSince();
+  ev({ ip: "198.51.100.1", userAgent: "browser-a" });
+  ev({ ip: "198.51.100.1", userAgent: "browser-a" });
+  ev({ ip: "198.51.100.2", userAgent: "browser-a" });
+  const added = rowsSince().slice(before.length);
+  check("The same device hashes to one visitor",
+    added[0]!.visitor === added[1]!.visitor);
+  check("A different device hashes to a different visitor",
+    added[0]!.visitor !== added[2]!.visitor);
+  check("The visitor id is a hash, not anything reversible",
+    typeof added[0]!.visitor === "string" && /^[0-9a-f]{16}$/.test(String(added[0]!.visitor)));
+
+  /**
+   * Without a ceiling, one script can add a million rows to the table the
+   * launch is judged from — and the first symptom is a dashboard that reads
+   * like a hit.
+   */
+  let accepted = 0;
+  for (let i = 0; i < 200; i++) if (ev({ ip: "192.0.2.77", userAgent: "flood" })) accepted++;
+  check("A flood from one visitor is capped", accepted > 0 && accepted <= 60, `${accepted} stored`);
+
+  // The summary must survive being asked for a window with rows in it.
+  const summary = analyticsSummary(1);
+  check("The summary reports the funnel with a source per step",
+    summary.funnel.length > 0
+      && summary.funnel.every((f) => f.source === "web" || f.source === "server"));
+  check("Funnel steps after the web ones are server-counted",
+    summary.funnel.filter((f) => f.source === "server").length >= 4);
+
+  db.prepare(`DELETE FROM web_events WHERE id >= ?`).run(firstNewId);
+}
+
+// ── 19. SEO: the tags, the sitemap and the files must agree ──────────────
+
+section("19. SEO: canonical, sitemap and robots stay in agreement");
+
+/**
+ * The failure this section prevents is not "we forgot a meta tag" — it is the
+ * slower one where a page is renamed, or the domain moves, and the canonical
+ * tag, the sitemap and the actual file quietly stop pointing at the same
+ * thing. Google then indexes one URL, we advertise another, and the two
+ * disagree for weeks before anyone notices.
+ */
+{
+  const PUBLIC_PAGES = ["index.html", "pricing.html", "privacy.html", "terms.html"];
+  const PRIVATE_PAGES = ["app.html", "admin.html"];
+
+  const robotsPath = path.join(webDir, "robots.txt");
+  const sitemapPath = path.join(webDir, "sitemap.xml");
+  check("robots.txt exists", existsSync(robotsPath));
+  check("sitemap.xml exists", existsSync(sitemapPath));
+
+  const robots = existsSync(robotsPath) ? readFileSync(robotsPath, "utf8") : "";
+  const sitemap = existsSync(sitemapPath) ? readFileSync(sitemapPath, "utf8") : "";
+
+  check("robots.txt points at the sitemap", /^Sitemap:\s*https?:\/\/\S+/m.test(robots));
+  check("robots.txt keeps crawlers out of the signed-in app", /Disallow:\s*\/app/.test(robots));
+  check("robots.txt keeps crawlers out of the API", /Disallow:\s*\/api\//.test(robots));
+
+  const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]!);
+  check("The sitemap lists every public page", locs.length === PUBLIC_PAGES.length,
+    `${locs.length} entries`);
+
+  // A sitemap entry for a file that does not exist is a soft 404 handed
+  // straight to the crawler.
+  for (const loc of locs) {
+    const route = new URL(loc).pathname;
+    const file = route === "/" ? "index.html" : route.replace(/^\//, "");
+    check(`Sitemap ${route} resolves to a real file`, existsSync(path.join(webDir, file)));
+  }
+
+  // Nothing behind sign-in belongs in a sitemap.
+  check("The sitemap lists nothing private",
+    !locs.some((l) => /\/(app|admin)/.test(l)), locs.join(" "));
+
+  const origin = locs.length > 0 ? new URL(locs[0]!).origin : "";
+
+  for (const file of PUBLIC_PAGES) {
+    const html = readFileSync(path.join(webDir, file), "utf8");
+
+    // No doctype means quirks mode, where box-sizing differs from every other
+    // page in the app. This was real: three pages shipped without one.
+    check(`web/${file} declares a doctype`, /^\s*<!doctype html>/i.test(html));
+    check(`web/${file} declares a language`, /<html[^>]+lang="[a-z-]+"/i.test(html));
+
+    const title = html.match(/<title>([^<]+)<\/title>/);
+    check(`web/${file} has a title`, Boolean(title && title[1]!.trim().length > 0));
+    check(`web/${file} has a meta description`,
+      /<meta\s+name="description"\s+content="[^"]{40,}"/.test(html));
+
+    const canonical = html.match(/<link\s+rel="canonical"\s+href="([^"]+)"/);
+    check(`web/${file} has a canonical URL`, Boolean(canonical));
+    if (canonical) {
+      const route = new URL(canonical[1]!).pathname;
+      const target = route === "/" ? "index.html" : route.replace(/^\//, "");
+      check(`web/${file} canonical points at itself`, target === file, canonical[1]!);
+      check(`web/${file} canonical is in the sitemap`, locs.includes(canonical[1]!));
+      check(`web/${file} canonical shares the sitemap's origin`,
+        new URL(canonical[1]!).origin === origin);
+    }
+
+    // og:url and canonical disagreeing is how a share and a search result end
+    // up as two different pages in Google's index.
+    const ogUrl = html.match(/<meta\s+property="og:url"\s+content="([^"]+)"/);
+    check(`web/${file} og:url matches its canonical`,
+      Boolean(ogUrl && canonical && ogUrl[1] === canonical[1]),
+      `${ogUrl?.[1]} vs ${canonical?.[1]}`);
+
+    const ogImage = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/);
+    check(`web/${file} og:image resolves to a file that exists`,
+      Boolean(ogImage) && existsSync(path.join(webDir, new URL(ogImage![1]!).pathname.slice(1))));
+  }
+
+  for (const file of PRIVATE_PAGES) {
+    const html = readFileSync(path.join(webDir, file), "utf8");
+    check(`web/${file} is noindex`, /<meta\s+name="robots"\s+content="[^"]*noindex/.test(html));
+  }
+}
+
+// ── 20. OAuth verification: what a Google reviewer must find on the homepage ─
+
+section("20. OAuth verification: the homepage claims Google checks");
+
+/**
+ * Google rejected a submission with three findings. Two of them were things a
+ * check could have caught before six weeks of review were spent:
+ *
+ *   "Your homepage does not explain the purpose of your app."
+ *   "The app name configured for your OAuth consent screen does not match the
+ *    app name on your homepage."
+ *
+ * The third — the homepage domain not being registered to us — is a purchase,
+ * not a code change, and nothing here can assert it.
+ *
+ * The scope checks are the valuable ones. If someone adds a scope in config.ts
+ * and does not disclose it on the homepage, the consent screen and the homepage
+ * disagree — precisely the class of finding that costs another review cycle.
+ * The build fails instead.
+ */
+{
+  const APP_NAME = "Mailwarden";
+  const home = readFileSync(path.join(webDir, "index.html"), "utf8");
+  const scopes = config.google.scopes as readonly string[];
+
+  /**
+   * Match the <h1> against markup with <style> and <script> stripped out.
+   *
+   * Without this it found the literal "<h1>" inside a CSS comment explaining
+   * the <h1>, captured everything from there to the real closing tag, and
+   * passed for entirely the wrong reason. A check that cannot fail is worse
+   * than no check, because it gets trusted.
+   */
+  const visible = home
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "");
+
+  const h1 = visible.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+  const h1Text = (h1?.[1] ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  check("The homepage <h1> carries the app name verbatim",
+    h1Text.includes(APP_NAME), h1Text.slice(0, 80));
+  check("The <title> carries the same app name",
+    (home.match(/<title>([^<]*)<\/title>/)?.[1] ?? "").includes(APP_NAME));
+
+  // Every scope the consent screen will show must be named on the page that
+  // justifies it, in full rather than as a shortened label.
+  for (const scope of scopes) {
+    check(`The homepage discloses ${scope.replace("https://www.googleapis.com/auth/", "")}`,
+      home.includes(scope), scope);
+  }
+
+  // ...and the page may not claim a scope the app does not request.
+  const claimed = [...home.matchAll(/https:\/\/www\.googleapis\.com\/auth\/[a-z.]+/g)]
+    .map((m) => m[0]);
+  const undeclared = claimed.filter((c) => !scopes.includes(c));
+  check("The homepage claims no scope the app does not request",
+    undeclared.length === 0, undeclared.join(", "));
+
+  check("The homepage explains what the app does",
+    /<h2[^>]*>\s*What Mailwarden does/i.test(home));
+  check("The homepage links its privacy policy", /href="\/privacy\.html"/.test(home));
+  check("The homepage cites the Google API Services User Data Policy",
+    home.includes("developers.google.com/terms/api-services-user-data-policy"));
+}
 
 // ── Done ─────────────────────────────────────────────────────────────────
 

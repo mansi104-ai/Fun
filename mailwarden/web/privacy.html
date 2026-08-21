@@ -1,3 +1,6 @@
+<!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Privacy — Mailwarden</title>
@@ -15,6 +18,7 @@
 <meta property="og:image:height" content="630" />
 <meta property="og:image:alt" content="Mailwarden wordmark on black, over the line “Clean your Gmail. Without losing what matters.” and three tags: Safe, Review, Protected." />
 <meta name="twitter:card" content="summary_large_image" />
+<link rel="canonical" href="https://mailwarden.fly.dev/privacy.html" />
 <link rel="stylesheet" href="/brand.css" />
 <style>
   .brand { margin-bottom: 28px; }
@@ -27,6 +31,8 @@
   code { background: var(--raised); padding: 2px 6px; border-radius: 5px; font-size: .88em; }
 </style>
 
+</head>
+<body>
 <main class="wrap">
   <a class="brand" href="/" aria-label="Mailwarden home">
     <span class="brand-tile" aria-hidden="true">
@@ -45,7 +51,7 @@
     <a href="https://github.com/mansi104-ai/Fun">github.com/mansi104-ai/Fun</a>.
     Every claim below corresponds to code, not intention.
   </p>
-  <p class="muted">Last updated 10 August 2026.</p>
+  <p class="muted">Last updated 21 August 2026.</p>
 
   <h2>What Mailwarden can and cannot do</h2>
   <p>
@@ -97,6 +103,35 @@
     (free tier) or Anthropic (paid tier), carrying only those aggregate figures.
   </p>
 
+  <h2>Website analytics</h2>
+  <p>
+    The public pages count visits, using our own code and our own database. There is
+    <strong>no third-party analytics service, no advertising tag, and no tracking
+    cookie</strong> — which is also why you have not been asked to accept one.
+  </p>
+  <p>Each recorded event holds exactly five things:</p>
+  <ul>
+    <li>An event name from a fixed list — for example <code>pageview</code></li>
+    <li>The page path, from a fixed list of public pages</li>
+    <li>The <strong>host</strong> of the referring site, never the full URL</li>
+    <li>A <code>utm_source</code> slug, when the link you followed carried one</li>
+    <li>A visitor hash, described next</li>
+  </ul>
+  <p>
+    The visitor hash is <code>SHA-256(daily salt + IP address + user agent)</code>.
+    The IP and user agent are hashed and discarded — <strong>neither is ever
+    written down</strong>. The salt is random, held in memory only, and replaced
+    every day, so yesterday's rows cannot be re-identified even by someone holding
+    both the database and today's salt: the salt that made them no longer exists.
+    Analytics rows are deleted after 90 days.
+  </p>
+  <p>
+    None of this reads your mailbox, and none of it is joined to your account — the
+    endpoint that receives these events is not told who you are. Your own actions
+    inside the app are recorded separately, in the audit log you can read at
+    <code>/api/audit</code>.
+  </p>
+
   <h2>Selling data</h2>
   <p>
     We do not sell your data or your metadata, and we do not advertise against it.
@@ -140,3 +175,7 @@
     <a href="/">Back to Mailwarden</a> · <a href="/terms.html">Terms</a>
   </p>
 </main>
+
+<script src="/analytics.js" defer></script>
+</body>
+</html>

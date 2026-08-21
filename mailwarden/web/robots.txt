@@ -1,0 +1,23 @@
+# Mailwarden
+#
+# The four marketing pages are crawlable. Everything behind sign-in is not:
+# /app and /api return either a redirect or a 401 to a crawler, so indexing
+# them wastes crawl budget and can surface a login wall as a search result for
+# the product's own name.
+#
+# This file is not a security control — /admin.html is admin-gated server-side
+# and carries <meta name="robots" content="noindex"> of its own. Listing a
+# private path in robots.txt is what tells a scanner where to look, so the
+# blanket /api and /auth rules deliberately do not enumerate anything.
+
+User-agent: *
+Allow: /$
+Allow: /pricing.html
+Allow: /privacy.html
+Allow: /terms.html
+Disallow: /app
+Disallow: /api/
+Disallow: /auth/
+Disallow: /admin.html
+
+Sitemap: https://mailwarden.fly.dev/sitemap.xml

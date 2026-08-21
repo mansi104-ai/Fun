@@ -48,7 +48,83 @@ async function boot() {
     throw err;
   }
   $("panel").hidden = false;
+  await loadAnalytics(7);
   await loadRequests();
+}
+
+// ── Traffic ──────────────────────────────────────────────────────────
+
+const pct = (n, of) => (of > 0 ? Math.round((n / of) * 100) : 0);
+
+/**
+ * Rows as bars, scaled to the largest value rather than to the total.
+ *
+ * Scaling to the total makes a healthy spread of ten referrers render as ten
+ * identical slivers, which is the shape of "no information". Scaling to the
+ * leader is what makes second and third place legible — the number is printed
+ * beside every bar anyway, so the bar only has to carry the comparison.
+ */
+function bars(rows, label, value) {
+  if (rows.length === 0) return `<p class="muted" style="margin:0">Nothing yet.</p>`;
+  const top = Math.max(...rows.map(value));
+  return rows.map((r) => `
+    <div class="bar-row">
+      <span title="${esc(label(r))}">${esc(label(r))}</span>
+      <span class="bar"><i style="width:${pct(value(r), top)}%"></i></span>
+      <span class="bar-n">${Number(value(r)).toLocaleString()}</span>
+    </div>`).join("");
+}
+
+async function loadAnalytics(days) {
+  for (const el of document.querySelectorAll("#ranges button")) {
+    el.classList.toggle("primary", Number(el.dataset.days) === days);
+    el.onclick = () => loadAnalytics(Number(el.dataset.days));
+  }
+
+  const box = $("analytics");
+  box.innerHTML = `<p class="muted">Loading…</p>`;
+  let a;
+  try {
+    a = await api(`/api/admin/analytics?days=${days}`);
+  } catch (err) {
+    box.innerHTML = `<p class="err">${esc(err.message)}</p>`;
+    return;
+  }
+
+  const landed = a.funnel[0]?.count ?? 0;
+
+  box.innerHTML = `
+    <div class="stats">
+      <div><div class="stat-n">${a.traffic.visitors.toLocaleString()}</div>
+           <div class="stat-l">Visitors</div></div>
+      <div><div class="stat-n">${a.traffic.pageviews.toLocaleString()}</div>
+           <div class="stat-l">Pageviews</div></div>
+      <div><div class="stat-n">${a.referrers.length.toLocaleString()}</div>
+           <div class="stat-l">Referring sites</div></div>
+    </div>
+
+    <h3 style="font-size:.82rem; text-transform:uppercase; letter-spacing:.05em;
+               color:var(--muted); margin:0 0 6px">Funnel</h3>
+    ${a.funnel.map((f) => `
+      <div class="bar-row">
+        <span>${esc(f.step)}${f.source === "server"
+          ? ` <span class="pill ok" style="font-size:.65rem">verified</span>` : ""}</span>
+        <span class="bar"><i style="width:${pct(f.count, landed)}%"></i></span>
+        <span class="bar-n">${f.count.toLocaleString()}${
+          landed > 0 ? ` · ${pct(f.count, landed)}%` : ""}</span>
+      </div>`).join("")}
+    <p class="muted" style="font-size:.8rem; margin:6px 0 22px">
+      Steps marked <b>verified</b> are counted from the server's own audit log as
+      the action happens, so they cannot be inflated by anyone posting at the
+      public event endpoint. The two web steps can.
+    </p>
+
+    <div class="panes">
+      <div><h3>Pages</h3>${bars(a.pages, (r) => r.path, (r) => r.views)}</div>
+      <div><h3>Referrers</h3>${bars(a.referrers, (r) => r.host, (r) => r.visitors)}</div>
+      <div><h3>Campaign source</h3>${bars(a.sources, (r) => r.source, (r) => r.visitors)}</div>
+      <div><h3>By day</h3>${bars(a.daily, (r) => r.day, (r) => r.visitors)}</div>
+    </div>`;
 }
 
 async function loadOrders() {

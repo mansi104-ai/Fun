@@ -213,6 +213,40 @@ paid channel reliably delivers for this category. See docs/02 §6.
 
 ---
 
+## Step 5 — instrumentation, before you post anything
+
+The outreach in Step 4 is worth doing once. Posting to Show HN without knowing
+which link brought people is spending that one chance and learning nothing.
+
+**Already live, nothing to set up:**
+
+- **`/admin.html` → Traffic.** Visitors, pageviews, top pages, referring sites,
+  `utm_source`, and the full funnel from "landed" to "paid". First-party and
+  cookieless: no vendor, no cookie banner, no CSP exception, and it stays
+  consistent with what `/privacy.html` promises. Steps marked *verified* are
+  counted from the server's own audit log as the action happens, so they cannot
+  be inflated by anyone posting at the public event endpoint.
+- **Tag your own links.** Append `?utm_source=hn`, `?utm_source=reddit`,
+  `?utm_source=twitter` to what you post. Untagged links still show under
+  referring sites, but only a tag survives someone copying the URL onward.
+
+**Two things that need your Google account, ~10 minutes:**
+
+1. **Search Console** — add the property, verify it, submit
+   `https://mailwarden.fly.dev/sitemap.xml`. A sitemap nobody submits does
+   nothing on its own.
+2. **Rich Results Test** — paste the landing page and the pricing page. Both
+   carry `schema.org` markup with real prices from `priceCatalogue()`. There is
+   deliberately no `aggregateRating`: we have no reviews, and inventing them is
+   both a lie and a manual-action risk.
+
+**What the analytics deliberately cannot tell you:** a visitor is per-device and
+resets at midnight UTC, because the salt that identifies one rotates daily and
+is never stored. This measures a launch, not a cohort. If you later need
+retention curves, that is a different tool and a different privacy disclosure.
+
+---
+
 ## What I could not do for you
 
 Stated plainly so nothing here is a surprise:
@@ -234,6 +268,6 @@ oversell handling, and a pricing page that reads live availability. It is one
 | Gap | Why it matters |
 |---|---|
 | **Undo never run against live Gmail** | It is the backstop your entire safety pitch rests on. Test it before customers do. |
-| `og.png` missing | Links shared to Twitter/LinkedIn/Slack render with no preview image. Directly costs you clicks on exactly the posts in Step 4. |
+| Custom domain | Everything points at `mailwarden.fly.dev`. A `.fly.dev` subdomain ranks worse and reads as pre-launch. Moving means updating `APP_URL`, the Google OAuth redirect URI, and the four canonical/`og:url`/sitemap values together — smoke check 19 fails if they drift apart. |
 | SQLite, single instance | Fine for 100 users. Blocks scale past that. |
 | `auto_stop_machines = "stop"` | May kill a long scan mid-flight. |

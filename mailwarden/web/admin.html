@@ -21,6 +21,18 @@
   .pill { font-size:.74rem; padding:3px 9px; border-radius:999px; background:var(--raised); }
   .pill.ok { color:var(--safe); font-weight:640; }
   .pill.wait { color:var(--warn); font-weight:640; }
+  .stats { display:flex; gap:22px; flex-wrap:wrap; margin-bottom:18px; }
+  .stat-n { font-size:1.7rem; font-weight:700; letter-spacing:-0.02em; line-height:1.1; }
+  .stat-l { font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  .bar-row { display:grid; grid-template-columns:minmax(90px,1fr) 3fr auto; gap:10px;
+             align-items:center; padding:5px 0; font-size:.88rem; }
+  .bar { background:var(--raised); border-radius:999px; height:8px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background:var(--text); border-radius:999px; }
+  .bar-n { font-variant-numeric:tabular-nums; color:var(--muted); font-size:.85rem; }
+  .panes { display:grid; gap:22px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }
+  .panes h3 { font-size:.82rem; text-transform:uppercase; letter-spacing:.05em;
+              color:var(--muted); margin:0 0 6px; font-weight:620; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
   button { font:inherit; cursor:pointer; border-radius:9px; border:1px solid var(--border);
            background:var(--surface); color:var(--text); padding:7px 13px; }
   button:hover:not(:disabled) { background:var(--raised); }
@@ -56,6 +68,20 @@
   </div>
 
   <div id="panel" hidden>
+    <h2>Traffic</h2>
+    <p class="muted" style="margin-top:0">
+      First-party and cookieless. A visitor is per-device and resets at midnight
+      UTC — the salt that identifies one rotates daily and is never stored, so
+      older rows cannot be re-identified. Nothing here records an IP, a user
+      agent, a full referrer URL, or which account did what.
+    </p>
+    <div class="row" id="ranges" style="margin-bottom:12px">
+      <button data-days="1">24 hours</button>
+      <button data-days="7" class="primary">7 days</button>
+      <button data-days="30">30 days</button>
+    </div>
+    <div id="analytics" class="muted">Loading…</div>
+
     <h2>Payments to confirm</h2>
     <p class="muted" style="margin-top:0">
       Match the reference against your bank statement, paste the UTR, and confirm.

@@ -133,11 +133,31 @@ if (!CHROME) {
       }
     };
     await sleep(6000);
-    ws.close();
 
     check("Browser loaded /app.js", requests.some((u) => u.endsWith("/app.js")));
     check("Client issued an API call", requests.some((u) => u.includes("/api/")),
       requests.some((u) => u.includes("/api/")) ? "" : "client never executed");
+
+    /**
+     * The landing page, in a real browser, for two reasons a status code
+     * cannot cover:
+     *
+     *   1. Analytics that never fires looks exactly like a launch nobody came
+     *      to. The only proof is seeing the browser POST to /api/e.
+     *   2. The structured data is a <script type="application/ld+json"> with no
+     *      src. That is a CSP "data block" and is meant to be exempt from
+     *      script-src — but "meant to be" is not evidence, and if this CSP ever
+     *      does block it, the rich result silently never appears.
+     */
+    const beforeLanding = requests.length;
+    send("Page.navigate", { url: `${BASE}/` });
+    await sleep(5000);
+    ws.close();
+
+    const landing = requests.slice(beforeLanding);
+    check("Landing page loaded /analytics.js", landing.some((u) => u.endsWith("/analytics.js")));
+    check("Analytics actually fired a pageview", landing.some((u) => u.endsWith("/api/e")),
+      landing.some((u) => u.endsWith("/api/e")) ? "" : "no event reached the server");
     check("No CSP violations", violations.length === 0, violations[0]?.slice(0, 120) ?? "");
   } catch (err) {
     // A broken harness must not masquerade as a broken app, nor as a pass.
