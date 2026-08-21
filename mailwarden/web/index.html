@@ -80,35 +80,6 @@
     .signup input { flex: 0 0 auto; width: 100%; }
   }
 
-  /* OAuth review requires the homepage to state the app's purpose and the
-     Google user data it touches, under the same name as the consent screen.
-     These sections exist for that as much as for the reader — see docs/03. */
-  section { margin-top: 44px; }
-  h2 { font-size: 1.15rem; letter-spacing: -0.015em; margin: 0 0 12px; }
-  h3 { font-size: .95rem; margin: 0 0 6px; font-weight: 640; }
-  .scopes { display: grid; gap: 14px; margin: 0; }
-  .scope {
-    border: 1px solid var(--border); border-radius: var(--radius-sm);
-    padding: 14px 16px; background: var(--surface);
-  }
-  .scope code {
-    font-family: var(--font-mono); font-size: .82rem;
-    background: var(--raised); padding: 2px 6px; border-radius: 5px;
-    overflow-wrap: anywhere;
-  }
-  .scope p { margin: 8px 0 0; font-size: .92rem; color: var(--muted); }
-  .steps { counter-reset: step; list-style: none; padding: 0; }
-  .steps li {
-    counter-increment: step; position: relative; padding-left: 30px;
-    margin-bottom: 12px;
-  }
-  .steps li::before {
-    content: counter(step); position: absolute; left: 0; top: 1px;
-    width: 20px; height: 20px; border-radius: 50%;
-    background: var(--accent); color: var(--accent-fg);
-    font-size: .72rem; font-weight: 640;
-    display: flex; align-items: center; justify-content: center;
-  }
 </style>
 </head>
 <body>
@@ -130,9 +101,8 @@
     <span class="hero-line">Clean your Gmail. Without losing what matters.</span>
   </h1>
   <p class="lede">
-    <strong>Mailwarden</strong> finds the clutter in your Gmail inbox, shows you why it
-    thinks each sender is safe to clean, and waits for your approval before anything
-    moves. It archives and trashes. It cannot permanently delete.
+    Mailwarden finds the clutter, shows you why it thinks each sender is safe,
+    and waits for your approval before anything moves.
   </p>
 
   <form id="inviteForm" class="signup">
@@ -144,107 +114,6 @@
   <p class="muted" style="margin:8px 0 0">
     <a href="/auth/google" data-evt="cta_signin">Already invited? Sign in</a>
   </p>
-
-  <section>
-    <h2>What Mailwarden does</h2>
-    <p>
-      A cluttered Gmail inbox usually holds tens of thousands of messages but only
-      150–400 distinct bulk senders — newsletters, notifications, promotions,
-      receipts. Mailwarden groups your inbox by sender so you make roughly 200
-      decisions instead of 20,000.
-    </p>
-    <p>
-      For each sender it shows the evidence behind its verdict: how many messages,
-      how many you have opened, how far back they go, whether the sender offers a
-      one-click unsubscribe. You choose what to archive, what to trash, and what to
-      leave alone. Mailwarden then carries out exactly what you approved and gives
-      you a receipt you can reverse.
-    </p>
-  </section>
-
-  <section>
-    <h2>How it works</h2>
-    <ol class="steps">
-      <li><strong>Scan.</strong> Mailwarden reads message metadata — never message
-        content — and groups your inbox by sender.</li>
-      <li><strong>Review.</strong> Every sender is classified and shown to you with
-        the reasoning. Nothing is hidden behind a summary.</li>
-      <li><strong>Approve.</strong> You select what should happen. Nothing moves
-        until you press a button on a screen listing exactly what will move.</li>
-      <li><strong>Undo.</strong> Every batch is recorded with each message's prior
-        labels, so it can be reversed exactly.</li>
-    </ol>
-  </section>
-
-  <section>
-    <h2>What Mailwarden accesses, and why</h2>
-    <p class="muted" style="margin-top:0">
-      Mailwarden requests the smallest set of Google permissions that lets it do the
-      job, and no others.
-    </p>
-    <div class="scopes">
-      <div class="scope">
-        <h3><code>https://www.googleapis.com/auth/gmail.modify</code></h3>
-        <p>
-          Lets Mailwarden read message metadata and move messages — archive, apply
-          labels, or send to Trash — once you have approved a batch. This permission
-          deliberately <strong>cannot permanently delete mail</strong>. Mailwarden never
-          requests <code>https://mail.google.com/</code>, the full-access permission that
-          can. Anything Mailwarden trashes stays in your Gmail Trash for 30 days, where
-          you can restore it yourself without Mailwarden's help.
-        </p>
-      </div>
-      <div class="scope">
-        <h3><code>https://www.googleapis.com/auth/userinfo.email</code></h3>
-        <p>
-          Identifies which Google account you signed in with, so your settings and
-          history belong to you and nobody else.
-        </p>
-      </div>
-    </div>
-    <p style="margin-top:16px">
-      Mailwarden stores sender addresses, message dates, sizes, and salted hashes —
-      never message bodies, never readable subject lines, never recipient addresses.
-      Message content is never written to its database, never logged, and never sent
-      to an AI model. Disconnecting revokes Mailwarden's access to your Google account
-      and purges its stored metadata within 24 hours.
-    </p>
-    <p>
-      Full detail is in the <a href="/privacy.html">privacy policy</a>. Mailwarden's use
-      of information received from Google APIs adheres to the
-      <a href="https://developers.google.com/terms/api-services-user-data-policy" rel="noopener">Google
-      API Services User Data Policy</a>, including the Limited Use requirements.
-    </p>
-  </section>
-
-  <section>
-    <h2>What Mailwarden will not touch</h2>
-    <p class="muted" style="margin-top:0">
-      These are protected automatically and cannot be overridden by a
-      misclassification:
-    </p>
-    <ul>
-      <li>Anything you have starred</li>
-      <li>Anything with an attachment</li>
-      <li>Threads you have replied to</li>
-      <li>Receipts, invoices, and order confirmations</li>
-      <li>Security mail — login codes, password resets, verification messages</li>
-    </ul>
-    <p class="muted">
-      Protection is deliberately over-inclusive. Missing some clutter is recoverable;
-      losing a receipt is not.
-    </p>
-  </section>
-
-  <section>
-    <h2>Who runs Mailwarden</h2>
-    <p>
-      Mailwarden is an independent product currently in a closed beta limited to 100
-      users — the cap Google places on an application whose OAuth verification is still
-      in progress. Questions, access requests, and data deletion requests go to
-      <a href="mailto:mkb.kalra@gmail.com">mkb.kalra@gmail.com</a>.
-    </p>
-  </section>
 
   <p class="muted" style="margin-top:40px; border-top:1px solid var(--border); padding-top:18px">
     Mailwarden cannot permanently delete anything. Every action is reversible for 30 days.

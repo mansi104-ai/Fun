@@ -1300,7 +1300,7 @@ section("19. SEO: canonical, sitemap and robots stay in agreement");
 
 // ── 20. OAuth verification: what a Google reviewer must find on the homepage ─
 
-section("20. OAuth verification: the homepage claims Google checks");
+section("20. OAuth verification: the app name, and where the scopes are disclosed");
 
 /**
  * Google rejected a submission with three findings. Two of them were things a
@@ -1366,25 +1366,40 @@ section("20. OAuth verification: the homepage claims Google checks");
   check("The <title> carries the same app name",
     (home.match(/<title>([^<]*)<\/title>/)?.[1] ?? "").includes(APP_NAME));
 
-  // Every scope the consent screen will show must be named on the page that
-  // justifies it, in full rather than as a shortened label.
+  check("The homepage links its privacy policy", /href="\/privacy\.html"/.test(home));
+
+  /**
+   * DELIBERATE GAP, recorded rather than quietly dropped.
+   *
+   * The homepage carried "What Mailwarden does", "How it works", a per-scope
+   * justification and the Limited Use citation, and those sections were what
+   * cleared Google's "your homepage does not explain the purpose of your app".
+   * They were removed on 2026-08-22 by explicit instruction — the page was
+   * judged too dense for a landing page — with the consequence stated at the
+   * time and accepted. See docs/03 §6.
+   *
+   * So there is no longer a check that the HOMEPAGE explains the purpose,
+   * because it no longer does, and a red suite that everyone learns to ignore
+   * is worse than an honest absence. What survives is the invariant that still
+   * holds and still has teeth: every scope must be disclosed in full on the
+   * privacy policy, which is where docs/03's own checklist puts it.
+   */
+  const privacy = readFileSync(path.join(webDir, "privacy.html"), "utf8");
+
   for (const scope of scopes) {
-    check(`The homepage discloses ${scope.replace("https://www.googleapis.com/auth/", "")}`,
-      home.includes(scope), scope);
+    check(`The privacy policy discloses ${scope.replace("https://www.googleapis.com/auth/", "")}`,
+      privacy.includes(scope), scope);
   }
 
-  // ...and the page may not claim a scope the app does not request.
-  const claimed = [...home.matchAll(/https:\/\/www\.googleapis\.com\/auth\/[a-z.]+/g)]
+  // ...and no page may claim a scope the app does not request.
+  const claimed = [...(home + privacy).matchAll(/https:\/\/www\.googleapis\.com\/auth\/[a-z.]+/g)]
     .map((m) => m[0]);
   const undeclared = claimed.filter((c) => !scopes.includes(c));
-  check("The homepage claims no scope the app does not request",
+  check("No page claims a scope the app does not request",
     undeclared.length === 0, undeclared.join(", "));
 
-  check("The homepage explains what the app does",
-    /<h2[^>]*>\s*What Mailwarden does/i.test(home));
-  check("The homepage links its privacy policy", /href="\/privacy\.html"/.test(home));
-  check("The homepage cites the Google API Services User Data Policy",
-    home.includes("developers.google.com/terms/api-services-user-data-policy"));
+  check("The privacy policy cites the Google API Services User Data Policy",
+    privacy.includes("developers.google.com/terms/api-services-user-data-policy"));
 }
 
 // ── Done ─────────────────────────────────────────────────────────────────

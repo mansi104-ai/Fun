@@ -136,12 +136,38 @@ looking for the name, which the `<h1>` and all four `<title>`s supply.
 Change either the consent screen or `APP_NAME` and you must change both, in the
 same sitting.
 
+### Homepage reverted to the hero page — 2026-08-22
+
+The long-form sections that cleared *"your homepage does not explain the purpose
+of your app"* were **removed by explicit instruction**: the page was judged too
+dense for a landing page whose job is the invite form. The consequence was
+stated before the change and accepted.
+
+**Expect finding #2 to return on the next submission.** This is a deliberate
+trade — a cleaner conversion page now, against another review cycle — not an
+oversight, and not something to "fix" by quietly reinstating the sections.
+
+What moved rather than disappeared:
+
+| | Before | Now |
+|---|---|---|
+| Full scope strings | homepage + nowhere else | `/privacy.html`, in the scope table |
+| Limited Use citation | homepage | `/privacy.html` |
+| App name in `<h1>` | homepage | **unchanged** — still there, it is ~10 characters and it clears finding #3 |
+| Purpose sections | homepage | **removed entirely** |
+
+The removed markup is recoverable from git: `git show 7c2cbab:mailwarden/web/index.html`.
+
+If a third rejection on purpose is unacceptable, the middle option that was on
+the table is one short "What it does" paragraph plus a two-line permissions
+note — roughly a quarter of the removed length, still clears the finding.
+
 ## Pre-resubmission gate
 
 Do not resubmit until all four are true:
 
-1. `cd server && pnpm test` — 257 checks, including §19 (SEO agreement) and §20
-   (what a reviewer must find).
+1. `cd server && pnpm test` — 256 checks, including §19 (SEO agreement) and §20
+   (the app name, and where the scopes are disclosed).
 2. `pnpm deploy` has actually run and finished.
 3. `node scripts/e2e.mjs https://<live host>` passes §3 in full.
 4. The consent screen's app name and homepage URL match what is live.

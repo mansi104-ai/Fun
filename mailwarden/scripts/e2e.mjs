@@ -121,26 +121,27 @@ check("Live <h1> carries the app name", h1Text.includes(APP_NAME), h1Text.slice(
 check("Live <title> carries the app name",
   (home.match(/<title>([^<]*)<\/title>/)?.[1] ?? "").includes(APP_NAME));
 
-// The purpose sections. A page missing these is the exact page Google rejected.
-for (const heading of [
-  "What Mailwarden does",
-  "How it works",
-  "What Mailwarden accesses, and why",
-]) {
-  check(`Live homepage has "${heading}"`, visible.includes(heading));
-}
+check("Live homepage links its privacy policy", /href="\/privacy\.html"/.test(home));
 
-// Both scopes, in full, on the page that justifies them.
+// The purpose sections and the per-scope justification used to live on the
+// homepage and were what cleared Google's "does not explain the purpose"
+// finding. They were removed on 2026-08-22 by explicit instruction — the page
+// was judged too dense — so that finding is expected to return on the next
+// submission. Recorded in docs/03 §6, not silently dropped.
+//
+// What is still asserted live is the privacy policy, which is where the full
+// scope strings and the Limited Use citation now live.
+const privacyRes = await fetch(BASE + "/privacy.html");
+const privacy = await privacyRes.text();
+
 for (const scope of [
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/userinfo.email",
 ]) {
-  check(`Live homepage discloses ${scope.split("/auth/")[1]}`, home.includes(scope));
+  check(`Live privacy policy discloses ${scope.split("/auth/")[1]}`, privacy.includes(scope));
 }
-
-check("Live homepage links its privacy policy", /href="\/privacy\.html"/.test(home));
-check("Live homepage cites the Limited Use policy",
-  home.includes("developers.google.com/terms/api-services-user-data-policy"));
+check("Live privacy policy cites the Limited Use policy",
+  privacy.includes("developers.google.com/terms/api-services-user-data-policy"));
 
 // Deployed-build tells. These shipped together with the homepage rewrite, so
 // their absence means the running image predates it — the single fact that
