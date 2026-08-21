@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import openpyxl
 import pandas as pd
 import streamlit as st
 
@@ -21,7 +22,12 @@ DATA_DIR = Path(os.environ.get("SCL_DATA_DIR") or (APP_DIR / "app_data"))
 IMAGES_DIR = DATA_DIR / "images"
 EXCEL_DIR = DATA_DIR / "excel"
 LOG_FILE = DATA_DIR / "processed_log.json"
-SHEET_NAME = "OCR_Extracted"
+# Fixed output layout: 11 values per row, written to columns C..M of the first
+# worksheet, six rows per image, one blank row between images.
+FIRST_DATA_COL = 3          # column C
+DATA_COL_COUNT = 11         # C..M inclusive
+ROWS_PER_IMAGE = 6
+META_COLS = ["Source Image", "Extracted At"]
 
 for d in (IMAGES_DIR, EXCEL_DIR):
     d.mkdir(parents=True, exist_ok=True)
@@ -35,6 +41,114 @@ def load_log() -> dict:
 
 def save_log(log: dict) -> None:
     LOG_FILE.write_text(json.dumps(log, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# Writing into the workbook, in the fixed C:M layout
+# ---------------------------------------------------------------------------
+
+def as_number(value):
+    """Parse one OCR'd cell into a float, or None if it isn't a number."""
+    if value is None:
+        return None
+    text = str(value).strip().replace(",", "")
+    if not text:
+        return None
+    # OCR reads a leading minus as a dash or en-dash often enough to be worth
+    # normalising rather than losing the sign.
+    text = text.replace("–", "-").replace("—", "-").replace("−", "-")
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def row_values(row):
+    """
+    Reduce one extracted row to its 11 numbers.
+
+    Anything non-numeric is dropped, which removes the row-label column
+    ("Membrane", "Bending (Inside)", ...) without needing to know which column
+    it landed in. If more than 11 numbers survive, the last 11 win -- a stray
+    number read out of the label column would appear at the front.
+    """
+    numbers = [n for n in (as_number(v) for v in row) if n is not None]
+    if len(numbers) > DATA_COL_COUNT:
+        numbers = numbers[-DATA_COL_COUNT:]
+    return numbers
+
+
+def next_block_row(ws):
+    """
+    One blank row below the last row holding anything in C:M.
+
+    Only the data columns decide what counts as occupied -- a title or note
+    parked in column A would otherwise push every new block far down the sheet.
+    An otherwise empty sheet starts at row 2, directly under the header.
+    """
+    last_col = FIRST_DATA_COL + DATA_COL_COUNT - 1
+    for row in range(ws.max_row, 1, -1):
+        if any(ws.cell(row=row, column=c).value not in (None, "")
+               for c in range(FIRST_DATA_COL, last_col + 1)):
+            return row + 2
+    return 2
+
+
+def append_blocks(excel_path, df):
+    """
+    Write each image's rows into C:M of the FIRST worksheet, appending below
+    whatever is already there and leaving one blank row between images.
+
+    Returns (written, skipped) where written is [(image, first_row, last_row)].
+    Nothing else on the sheet is touched, and the workbook's other tabs are
+    left alone -- openpyxl edits in place rather than rewriting the file the
+    way a pandas ExcelWriter round-trip does.
+    """
+    wb = openpyxl.load_workbook(excel_path)
+    ws = wb[wb.sheetnames[0]]
+
+    written, skipped = [], []
+    data_cols = [c for c in df.columns if c not in META_COLS]
+
+    group_key = "Source Image" if "Source Image" in df.columns else None
+    groups = df.groupby(group_key, sort=False) if group_key else [("edited rows", df)]
+
+    for image_name, group in groups:
+        rows = []
+        for _, r in group[data_cols].iterrows():
+            values = row_values(r.tolist())
+            if values:
+                rows.append(values)
+
+        if not rows:
+            skipped.append((image_name, "no numeric values found"))
+            continue
+        if len(rows) != ROWS_PER_IMAGE:
+            skipped.append((image_name, f"{len(rows)} rows, expected {ROWS_PER_IMAGE}"))
+            continue
+
+        start = next_block_row(ws)
+        for i, values in enumerate(rows):
+            for j, value in enumerate(values[:DATA_COL_COUNT]):
+                ws.cell(row=start + i, column=FIRST_DATA_COL + j, value=value)
+        written.append((image_name, start, start + len(rows) - 1))
+
+    wb.save(excel_path)
+    return written, skipped
+
+
+def read_data_block(excel_path):
+    """The current contents of C:M on the first worksheet, for display."""
+    wb = openpyxl.load_workbook(excel_path, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    last_col = FIRST_DATA_COL + DATA_COL_COUNT - 1
+    header = [ws.cell(row=1, column=c).value for c in range(FIRST_DATA_COL, last_col + 1)]
+    header = [h if h else chr(ord("C") + i) for i, h in enumerate(header)]
+    rows = [
+        [ws.cell(row=r, column=c).value for c in range(FIRST_DATA_COL, last_col + 1)]
+        for r in range(2, ws.max_row + 1)
+    ]
+    return pd.DataFrame(rows, columns=header)
 
 
 st.set_page_config(page_title="Table OCR to Excel", layout="wide")
@@ -178,41 +292,60 @@ if st.session_state.preview_df is not None:
 
     if st.button("Save to Excel", type="primary"):
         try:
-            existing = pd.read_excel(excel_path, sheet_name=SHEET_NAME)
-            combined = pd.concat([existing, edited], ignore_index=True)
-        except (ValueError, FileNotFoundError):
-            combined = edited
+            written, skipped = append_blocks(excel_path, edited)
+        except PermissionError:
+            st.error(
+                f"**{excel_path.name} could not be written.** If it is open in "
+                "Excel somewhere, close it and press Save again."
+            )
+        except Exception as e:
+            st.error(f"**Could not write to {excel_path.name}:** {e}")
+        else:
+            if written:
+                st.success(
+                    f"Written into **{excel_path.name}**, columns C:M of "
+                    f"'{openpyxl.load_workbook(excel_path).sheetnames[0]}':\n\n"
+                    + "\n".join(f"- {name} -> rows {a}-{b}" for name, a, b in written)
+                )
+                # Only images that actually landed are marked done, so a
+                # rejected one is retried rather than silently lost.
+                saved_names = {name for name, _, _ in written}
+                processed.update(n for n in st.session_state.targets_this_run if n in saved_names)
+                log["processed_images"] = sorted(processed)
+                save_log(log)
 
-        with pd.ExcelWriter(
-            excel_path,
-            engine="openpyxl",
-            mode="a" if excel_path.exists() else "w",
-            if_sheet_exists="replace",
-        ) as writer:
-            combined.to_excel(writer, sheet_name=SHEET_NAME, index=False)
+            if skipped:
+                st.warning(
+                    "Not written — each image must give exactly "
+                    f"{ROWS_PER_IMAGE} rows of {DATA_COL_COUNT} numbers:\n\n"
+                    + "\n".join(f"- **{name}**: {why}" for name, why in skipped)
+                    + "\n\nFix the rows above and press Save again."
+                )
 
-        processed.update(st.session_state.targets_this_run)
-        log["processed_images"] = sorted(processed)
-        save_log(log)
-
-        st.session_state.preview_df = None
-        st.session_state.targets_this_run = []
-        st.success(f"Saved into '{SHEET_NAME}' sheet of {excel_path.name}.")
-        st.rerun()
+            if written:
+                st.session_state.preview_df = None
+                st.session_state.targets_this_run = []
+                st.rerun()
 
 # ---------------------------------------------------------------------------
 # 5. Current extracted data + download
 # ---------------------------------------------------------------------------
-st.header("4. Extracted data & download")
+st.header("4. The workbook")
 if excel_path and excel_path.exists():
-    try:
-        current = pd.read_excel(excel_path, sheet_name=SHEET_NAME)
-        st.dataframe(current, use_container_width=True)
-    except ValueError:
-        st.info("No data extracted into this Excel file yet.")
+    st.caption(
+        f"This is **{excel_path.name}** itself — columns C:M of its first "
+        "worksheet, read back from the stored file. Saving edits it in place, "
+        "so there is no need to download it to keep your data; download only "
+        "when you want a copy on your own machine."
+    )
+    current = read_data_block(excel_path)
+    if current.dropna(how="all").empty:
+        st.info("Nothing written into C:M yet.")
+    else:
+        st.dataframe(current)
 
     st.download_button(
-        "Download Excel file",
+        "Download a copy",
         data=excel_path.read_bytes(),
         file_name=excel_path.name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

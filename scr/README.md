@@ -36,10 +36,27 @@ Open the URL Streamlit prints (usually http://localhost:8501).
    if no grid is found it falls back to plain OCR.
 4. **Review** — OCR on screenshots is not perfect, especially small/blurry
    text. Fix any misread cells in the editable table before saving.
-5. **Save** — writes into a sheet called `OCR_Extracted` in your Excel
-   file, appending to whatever's already there. Each row includes
-   `Source Image` and `Extracted At` columns.
-6. **Download** — grab the updated Excel file at any time.
+5. **Save** — writes into **columns C to M of the first worksheet**, six rows
+   per image, appending below whatever is already there and leaving **one
+   blank row between images**:
+
+   ```
+   row 1    SX  SY  SZ ... SEQV      <- your header row, untouched
+   rows 2-7    first image's 6 rows
+   row 8       (blank)
+   rows 9-14   second image's 6 rows
+   row 15      (blank)
+   rows 16-21  third image's 6 rows
+   ```
+
+   Nothing outside C:M is touched, and the workbook's other sheets are left
+   alone — openpyxl edits the file in place rather than rewriting it.
+
+   An image that does not give exactly 6 rows of 11 numbers is **not**
+   written; it is listed with the reason so you can fix it in the review
+   table and press Save again. A partial block never lands.
+6. **Download** — optional. Saving already updates the stored workbook, so
+   downloading is only for taking a copy onto your own machine.
 
 ## Persistence
 
