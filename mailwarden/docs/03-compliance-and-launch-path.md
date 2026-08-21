@@ -108,10 +108,43 @@ Limited Use citation, or — the valuable one — if a scope is added to
 it. A consent screen and a homepage that disagree is exactly what costs another
 six-week cycle.
 
-**If it is rejected a second time on the name**, the next lever is the wordmark:
-it is lowercase `mailwarden` by deliberate brand decision (docs/09 §3), while
-the consent screen says `Mailwarden`. Changing one of the two to match is a
-brand call, not an engineering one.
+### Second submission — rejected again, for a reason worth remembering
+
+Two findings came back, and the first one was **not a content problem**.
+
+*"Your homepage does not explain the purpose of your app."* — The homepage that
+explains the purpose had been written, reviewed, committed and pushed. It had
+never been **deployed**. Fly was still serving the previous build, so the
+reviewer read a 3.7 KB page with no `<h2>` on it at all, and a full cycle was
+spent proving that a `git push` is not a release.
+
+`node scripts/e2e.mjs https://mailwarden.fly.dev` now asserts, against the live
+host, everything smoke §20 asserts against the files: the app name in the
+`<h1>`, the three purpose headings, both scope strings, the privacy link, the
+Limited Use citation, and that `/analytics.js`, `/robots.txt` and `/sitemap.xml`
+are actually served. Run it before every resubmission. It reproduced both of
+Google's findings exactly when pointed at the undeployed site.
+
+*"The app name 'mailwarden' … does not match the app name on your homepage."* —
+Note the casing. The first rejection quoted `Mailwarden`; this one quoted
+`mailwarden`. The consent screen had been changed, the site had been changed the
+other way, and the two crossed over. **The canonical name is `Mailwarden`** —
+capitalised — and it is written down once, in `APP_NAME` in smoke §20. The
+lowercase wordmark is the logotype and stays as it is (docs/09 §3); Google is
+looking for the name, which the `<h1>` and all four `<title>`s supply.
+
+Change either the consent screen or `APP_NAME` and you must change both, in the
+same sitting.
+
+## Pre-resubmission gate
+
+Do not resubmit until all four are true:
+
+1. `cd server && pnpm test` — 257 checks, including §19 (SEO agreement) and §20
+   (what a reviewer must find).
+2. `pnpm deploy` has actually run and finished.
+3. `node scripts/e2e.mjs https://<live host>` passes §3 in full.
+4. The consent screen's app name and homepage URL match what is live.
 
 ## Sources
 - [Restricted scope verification — Google](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)

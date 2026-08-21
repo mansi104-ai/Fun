@@ -80,8 +80,77 @@ const malformed = await status("/api/scan", {
 });
 check("Malformed JSON is rejected as 400", malformed === 400, `got ${malformed}`);
 
-// ── 3. The client actually runs ─────────────────────────────────────────
-section("3. Browser: the client executes and calls the API");
+// ── 3. What is actually LIVE for a Google reviewer ──────────────────────
+//
+// This section exists because of a specific, expensive failure.
+//
+// OAuth verification was rejected with "your homepage does not explain the
+// purpose of your app". The homepage explaining the purpose had been written,
+// reviewed, committed and pushed — and never deployed. Fly was still serving
+// the previous build, so the reviewer read a page that did not contain a word
+// of it, and the resubmission burned a full cycle.
+//
+// smoke.ts §20 asserts these same claims against the FILES. It cannot tell you
+// whether the files reached production. That gap is what this closes, and it
+// is why this belongs in e2e rather than in the offline suite.
+//
+// Run this against the real host before every resubmission:
+//
+//     node scripts/e2e.mjs https://mailwarden.fly.dev
+//
+section("3. Live homepage: what a Google reviewer will actually read");
+
+// The app name, byte-for-byte as configured on the OAuth consent screen.
+// Google compares the two strings, and the casing has now been wrong in both
+// directions across two review cycles — the consent screen was 'Mailwarden',
+// then 'mailwarden', while the site said the other one each time. If you change
+// one, change the other in the same sitting.
+const APP_NAME = "Mailwarden";
+
+const homeRes = await fetch(BASE + "/");
+const home = await homeRes.text();
+const visible = home
+  .replace(/<style[\s\S]*?<\/style>/gi, "")
+  .replace(/<script[\s\S]*?<\/script>/gi, "");
+
+check("Live homepage is reachable", homeRes.status === 200, `status ${homeRes.status}`);
+
+const h1 = visible.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+const h1Text = (h1?.[1] ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+check("Live <h1> carries the app name", h1Text.includes(APP_NAME), h1Text.slice(0, 70));
+check("Live <title> carries the app name",
+  (home.match(/<title>([^<]*)<\/title>/)?.[1] ?? "").includes(APP_NAME));
+
+// The purpose sections. A page missing these is the exact page Google rejected.
+for (const heading of [
+  "What Mailwarden does",
+  "How it works",
+  "What Mailwarden accesses, and why",
+]) {
+  check(`Live homepage has "${heading}"`, visible.includes(heading));
+}
+
+// Both scopes, in full, on the page that justifies them.
+for (const scope of [
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/userinfo.email",
+]) {
+  check(`Live homepage discloses ${scope.split("/auth/")[1]}`, home.includes(scope));
+}
+
+check("Live homepage links its privacy policy", /href="\/privacy\.html"/.test(home));
+check("Live homepage cites the Limited Use policy",
+  home.includes("developers.google.com/terms/api-services-user-data-policy"));
+
+// Deployed-build tells. These shipped together with the homepage rewrite, so
+// their absence means the running image predates it — the single fact that
+// would have caught the wasted cycle.
+for (const asset of ["/analytics.js", "/robots.txt", "/sitemap.xml"]) {
+  check(`Live ${asset} is served`, (await status(asset)) === 200);
+}
+
+// ── 4. The client actually runs ─────────────────────────────────────────
+section("4. Browser: the client executes and calls the API");
 
 const CHROME = [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",

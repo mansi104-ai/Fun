@@ -1319,9 +1319,33 @@ section("20. OAuth verification: the homepage claims Google checks");
  * The build fails instead.
  */
 {
+  /**
+   * The app name, byte-for-byte as configured on the OAuth consent screen.
+   *
+   * Google compares those two strings, and the casing has now been wrong in
+   * BOTH directions across two review cycles: the consent screen read
+   * 'Mailwarden', then 'mailwarden', while the site said the other one each
+   * time. Changing either without the other is a six-week mistake, so this
+   * constant is the one place the name is written down — and the checks below
+   * all derive from it rather than repeating a literal.
+   *
+   * The lowercase wordmark is not a violation of this: it is the logotype, a
+   * deliberate brand decision (docs/09 §3), and Google is looking for the app's
+   * NAME on the page, which the <h1> and every <title> supply.
+   */
   const APP_NAME = "Mailwarden";
   const home = readFileSync(path.join(webDir, "index.html"), "utf8");
   const scopes = config.google.scopes as readonly string[];
+
+  // Uniform across the site, not just on the page Google reads first. A
+  // reviewer on a third cycle is looking for reasons, and two spellings of the
+  // product across four pages is a reason.
+  for (const file of ["index.html", "pricing.html", "privacy.html", "terms.html"]) {
+    const title = readFileSync(path.join(webDir, file), "utf8")
+      .match(/<title>([^<]*)<\/title>/)?.[1] ?? "";
+    check(`web/${file} <title> spells the app name consistently`,
+      title.includes(APP_NAME), title);
+  }
 
   /**
    * Match the <h1> against markup with <style> and <script> stripped out.
