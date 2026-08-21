@@ -381,6 +381,8 @@ function senderCard(s, state) {
     <div class="sender-actions">
       <button class="primary" data-act="archive" data-key="${esc(s.senderKey)}">
         Archive ${fmt.format(s.actionableCount)}</button>
+      ${s.deletableCount ? `<button class="danger" data-act="trash" data-key="${esc(s.senderKey)}">
+        Delete ${fmt.format(s.deletableCount)}</button>` : ""}
       <button data-act="read" data-key="${esc(s.senderKey)}">Read</button>
       <button data-act="protect" data-key="${esc(s.senderKey)}">Always protect</button>
       ${s.hasUnsubscribe ? `<button data-act="unsub" data-key="${esc(s.senderKey)}">Unsubscribe</button>` : ""}
@@ -393,6 +395,7 @@ function wireSenderCards() {
     el.onclick = () => {
       const { act, key } = el.dataset;
       if (act === "archive") return runSenders([key], "archive");
+      if (act === "trash") return runSenders([key], "trash");
       if (act === "read") return openReader(key);
       if (act === "protect") return protectSender(el, key);
       if (act === "unsub") return runUnsubscribe(el, key);
@@ -420,7 +423,9 @@ function startReview(queue, state) {
 /**
  * One sender at a time. The evidence sits above the actions so the decision is
  * made with the reasons in view, and Archive is visually primary because it is
- * the reversible one.
+ * the reversible one — Delete is offered beside it in danger red, never as the
+ * default, and carries its own (smaller) count because the guard layer holds
+ * more back from deletion than from archiving.
  */
 function renderReview(state) {
   show("review");
@@ -465,12 +470,15 @@ function renderReview(state) {
         <button id="revKeep">Keep</button>
         <button id="revRead">Read one</button>
       </div>
-      <div class="row" style="margin-top:8px">
-        <button class="danger" id="revTrash" style="flex:1">Move all ${fmt.format(s.actionableCount)} to trash</button>
-      </div>
+      ${s.deletableCount ? `<div class="row" style="margin-top:8px">
+        <button class="danger" id="revTrash" style="flex:1">Delete all ${fmt.format(s.deletableCount)}</button>
+      </div>` : ""}
       <p class="hint" style="margin-top:10px">
         Archive keeps everything in All Mail and is reversible for 30 days.
-        Trash starts Gmail's 30-day deletion clock.
+        Delete moves mail to Gmail's Trash, which Gmail empties after 30 days.
+        ${s.deletableCount && s.deletableCount !== s.actionableCount
+          ? `The two counts differ because attachments and mail Gmail marked
+             important are archived rather than deleted.` : ""}
       </p>
     </article>
 
@@ -481,7 +489,7 @@ function renderReview(state) {
 
   $("exitReview").onclick = () => goTab(state === "safe" ? "clean" : "review");
   $("revArchive").onclick = () => runSenders([s.senderKey], "archive", () => advance(state));
-  $("revTrash").onclick = () => runSenders([s.senderKey], "trash", () => advance(state));
+  if ($("revTrash")) $("revTrash").onclick = () => runSenders([s.senderKey], "trash", () => advance(state));
   $("revKeep").onclick = () => protectSender($("revKeep"), s.senderKey, () => advance(state));
   $("revRead").onclick = () => openReader(s.senderKey);
   $("revPrev").onclick = () => { reviewIndex = Math.max(0, reviewIndex - 1); renderReview(state); };
@@ -582,7 +590,7 @@ async function renderHistory() {
         <div class="hist-row">
           <div>
             <div><strong>${fmt.format(b.message_count)}</strong>
-              ${b.action === "trash" ? "trashed" : "archived"}</div>
+              ${b.action === "trash" ? "deleted" : "archived"}</div>
             <div class="hint">${day(b.created_at)} · ${mb(b.bytes_freed)}
               ${b.status === "undone" ? " · undone" : ""}</div>
           </div>
@@ -680,7 +688,7 @@ async function renderSettings() {
         <li><span class="mark" aria-hidden="true">🔒</span><span>Anything it does not understand well enough</span></li>
       </ul>
       <p class="hint" style="margin:12px 0 0">
-        Attachments and Gmail-important mail are never <em>trashed</em>; they can still be archived,
+        Attachments and Gmail-important mail are never <em>deleted</em>; they can still be archived,
         which is reversible.
       </p>
     </div>
@@ -746,7 +754,7 @@ async function confirmAndRun(plan, replan, after) {
   $("confirmBody").innerHTML = `
     <p style="font-size:1.02rem; margin-bottom:10px">
       <strong>${fmt.format(plan.messageCount)}</strong> emails will be
-      ${plan.action === "trash" ? "moved to trash" : "archived"}.
+      ${plan.action === "trash" ? "deleted — moved to Gmail's Trash" : "archived"}.
     </p>
     ${violations.filter((v) => v.severity === "confirm")
       .map((v) => `<div class="note warn">${esc(v.message)}</div>`).join("")}
@@ -773,7 +781,7 @@ async function confirmAndRun(plan, replan, after) {
   const runnable = blocking.length === 0 && plan.messageCount > 0;
   $("reallyConfirm").disabled = !runnable;
   $("reallyConfirm").textContent = runnable
-    ? (plan.action === "trash" ? "Move to trash" : "Archive them") : "Blocked";
+    ? (plan.action === "trash" ? "Delete them" : "Archive them") : "Blocked";
   $("confirmDialog").showModal();
 
   $("reallyConfirm").onclick = async () => {
@@ -807,13 +815,13 @@ function showReceipt(done) {
     <h1>Cleanup complete</h1>
     <p class="lede">
       ${fmt.format(done.messageCount)} emails
-      ${done.action === "trash" ? "moved to trash" : "archived"} ·
+      ${done.action === "trash" ? "deleted" : "archived"} ·
       ${mb(done.bytesFreed)} freed.
     </p>
     <div class="note safe">
       <strong>0 protected emails were touched.</strong>
       ${done.action === "trash"
-        ? "Trashed mail stays in Gmail for 30 days — restore it there, or undo the whole run."
+        ? "Deleted mail sits in Gmail's Trash for 30 days — restore it there, or undo the whole run."
         : "Archived mail is still in All Mail and fully searchable. Nothing was deleted."}
     </div>
     <div class="row" style="margin-top:18px">

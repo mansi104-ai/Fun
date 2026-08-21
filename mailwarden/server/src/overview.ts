@@ -1,4 +1,4 @@
-import { candidatesFor } from "./candidates.js";
+import { candidatesFor, type BatchAction } from "./candidates.js";
 import { db } from "./db.js";
 import { isSuggestable } from "./classify/index.js";
 import { DAY_MS, LIMITS } from "./safety/limits.js";
@@ -42,8 +42,10 @@ export interface SenderCard {
   displayName: string | null;
   category: string | null;
   messageCount: number;
-  /** Messages that would actually move. 0 for a protected sender. */
+  /** Messages archiving would actually move. 0 for a protected sender. */
   actionableCount: number;
+  /** Messages deleting would actually move. Always <= or != actionableCount. */
+  deletableCount: number;
   totalBytes: number;
   unreadCount: number;
   lastSeen: number;
@@ -273,17 +275,34 @@ export function sendersInState(
   if (senders.length === 0) return [];
 
   const keys = senders.map((s) => s.sender_key);
-  const verdict = evaluate({
-    accountId,
-    action: "archive",
-    senderKeys: keys,
-    candidates: candidatesFor(accountId, keys, "archive"),
-    confirmed: true,
-  });
 
-  const allowed = new Map<string, number>();
-  for (const c of verdict.allowed) allowed.set(c.sender_key, (allowed.get(c.sender_key) ?? 0) + 1);
+  /**
+   * One verdict per offered action, because delete is not archive with a
+   * different label. It starts from a different candidate set (anything not
+   * already in Trash, rather than inbox-only) and clears two extra guards —
+   * attachments and Gmail-important mail can be archived but never trashed.
+   * Reusing the archive count for a Delete button would therefore put a number
+   * on screen that does not match what the button does, and this module's rule
+   * is that every figure is derived, never invented.
+   */
+  const countsFor = (action: BatchAction) => {
+    const verdict = evaluate({
+      accountId,
+      action,
+      senderKeys: keys,
+      candidates: candidatesFor(accountId, keys, action),
+      confirmed: true,
+    });
+    const per = new Map<string, number>();
+    for (const c of verdict.allowed) per.set(c.sender_key, (per.get(c.sender_key) ?? 0) + 1);
+    return { verdict, per };
+  };
 
+  const { verdict, per: allowed } = countsFor("archive");
+  const { per: deletable } = countsFor("trash");
+
+  // Held-back reasons stay archive-derived: it is the gentler action, so a
+  // sender archiving will not touch is held for a reason that applies to both.
   const holdReason = new Map<string, string>();
   for (const e of verdict.exclusions) {
     if (!holdReason.has(e.senderKey)) holdReason.set(e.senderKey, e.reason);
@@ -296,6 +315,7 @@ export function sendersInState(
       category: s.category,
       messageCount: s.message_count,
       actionableCount: allowed.get(s.sender_key) ?? 0,
+      deletableCount: deletable.get(s.sender_key) ?? 0,
       totalBytes: s.total_bytes,
       unreadCount: s.unread_count,
       lastSeen: s.last_seen,

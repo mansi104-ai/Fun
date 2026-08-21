@@ -23,6 +23,7 @@ import { planBatch } from "./gmail/executor.js";
 import { aggregateSenders } from "./gmail/sync.js";
 import { isPubliclyRoutable, parseTargets } from "./gmail/unsubscribe.js";
 import { newId } from "./lib/crypto.js";
+import { sendersInState } from "./overview.js";
 import { config } from "./config.js";
 import { FOUNDING_SEATS, foundingSeatsSold, grantManual, isAdmin, requestAccess } from "./lib/billing.js";
 import { canExecuteBatch, entitlementsFor, setPlan } from "./lib/entitlements.js";
@@ -613,6 +614,24 @@ check("Important mail CAN be archived", archiveOk.has("important"));
 check("Each protection is reported to the user",
   ["STARRED", "IN_REPLIED_THREAD", "HAS_ATTACHMENT", "GMAIL_IMPORTANT"].every((code) =>
     trashVerdict.exclusions.some((e) => e.code === code)));
+
+/**
+ * The sender card offers Archive and Delete side by side, each with its own
+ * number. Those numbers come from separate dry runs precisely because the
+ * guards differ: this sender can have 3 messages archived but only 1 deleted.
+ * If the card ever reused one count for both buttons, the Delete button would
+ * promise two messages it is not allowed to touch — and the user would find
+ * out only from the confirmation screen.
+ */
+{
+  const card = sendersInState(msgAcct, "safe").find((c) => c.senderKey === "blast@shop.com");
+  check("The sender card offers a delete count", card !== undefined && card.deletableCount > 0,
+    JSON.stringify(card && { a: card.actionableCount, d: card.deletableCount }));
+  check("Archive count covers plain, attachment and important mail",
+    card?.actionableCount === 3);
+  check("Delete count excludes what may never be deleted",
+    card?.deletableCount === 1);
+}
 
 db.prepare(`DELETE FROM users WHERE id = ?`).run(msgUser);
 db.prepare(`DELETE FROM messages_meta WHERE account_id = ?`).run(msgAcct);
