@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from ocr_table import extract_table_from_image
+from ocr_table import extract_table_from_image, tesseract_ready
 
 # ---------------------------------------------------------------------------
 # Persistent storage (plain files on disk next to this script -> survives
@@ -40,6 +40,22 @@ st.caption(
     "Excel file. Everything is saved on disk, so it's still here next time "
     "you open the app."
 )
+
+# Tesseract is a system binary, not a Python package, so requirements.txt
+# cannot supply it. Fail here with an explanation rather than part-way through
+# OCR with a traceback.
+if tesseract_ready() is None:
+    st.error(
+        "**Tesseract OCR is not installed on this machine, so images cannot be read.**\n\n"
+        "*Deployed on Streamlit Community Cloud:* `packages.txt` must sit in the "
+        "**root of the repository** — unlike `requirements.txt`, Cloud does not "
+        "search upwards from the app file for it. There is one at the repo root "
+        "listing `tesseract-ocr`; reboot the app from *Manage app* so it reinstalls.\n\n"
+        "*Running locally:* `sudo apt-get install -y tesseract-ocr` on Linux, "
+        "`brew install tesseract` on macOS, or the installer from "
+        "https://github.com/UB-Mannheim/tesseract/wiki on Windows."
+    )
+    st.stop()
 
 log = load_log()
 

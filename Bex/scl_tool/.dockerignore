@@ -1,0 +1,12 @@
+.git
+.gitignore
+README.md
+run.py
+run.bat
+run.sh
+config.json
+packages.txt
+__pycache__
+**/__pycache__
+*.pyc
+.streamlit/secrets.toml

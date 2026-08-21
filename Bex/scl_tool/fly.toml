@@ -1,0 +1,53 @@
+# Fly.io deployment for the SCL Excel Extractor (the Streamlit UI in app.py).
+#
+#   cd Bex/scl_tool
+#   fly deploy --ha=false
+#
+# Open by default. To put a shared password in front of it, no code change is
+# needed -- only the secret:
+#   fly secrets set SCL_PASSWORD=... --app bex-scl-tool
+#
+# --ha=false is not optional. Streamlit keeps session state (here, the uploaded
+# workbook's bytes) in the process serving that session, so a second machine
+# would be a second, unshared copy of the app rather than more capacity.
+
+app = "bex-scl-tool"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# The reference workbook and the screenshot folders live here. This is what
+# makes the processing history meaningful: the same .xlsx is reopened every
+# session, so its Processing_History sheet keeps growing and screenshots that
+# were already read stay skipped. Without the volume every restart would hand
+# back an empty app.
+[[mounts]]
+  source = "scl_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Occasional-use tool: pay for it only while someone has it open. An open
+  # browser tab holds a websocket, which counts as activity, so the machine
+  # stays up for as long as the page is in front of someone. "suspend" resumes
+  # in a second or two, where a cold "stop" makes the first visitor wait out a
+  # full Python + Streamlit boot.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/_stcore/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  # Streamlit and pandas together idle in the low hundreds of MB before
+  # Tesseract has loaded a single page image, so 512mb leaves very little room
+  # for the OCR pass itself. 1gb is headroom, not a measured requirement.
+  memory = "1gb"

@@ -10,6 +10,21 @@ import pandas as pd
 import pytesseract
 
 
+def tesseract_ready():
+    """
+    Return the installed Tesseract version, or None if the binary is missing.
+
+    pytesseract is a wrapper around a separate command-line program, so `pip
+    install pytesseract` succeeding says nothing about whether OCR can run.
+    Checking once up front turns a TesseractNotFoundError traceback thrown
+    mid-OCR into something the page can explain.
+    """
+    try:
+        return str(pytesseract.get_tesseract_version())
+    except Exception:
+        return None
+
+
 def _ocr_cell(gray_img, x, y, w, h, pad=2):
     x0, y0 = max(x + pad, 0), max(y + pad, 0)
     x1, y1 = x + w - pad, y + h - pad

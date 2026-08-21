@@ -50,28 +50,63 @@ You have two options:
 streamlit run app.py
 ```
 
-This opens a browser tab with a simple UI. There are two modes, switchable
+This opens a browser tab with a simple UI. There are three modes, switchable
 at the top of the page:
 
-- **Upload files** — upload the reference Excel workbook and one or more
-  screenshots, click **Process images**, then click **Download updated
-  workbook**. This works both locally and if you deploy the app (e.g. to
-  Streamlit Community Cloud) — nothing is read from or written to any local
-  folder.
+- **Saved library** — the reference workbook and the screenshot folders are
+  kept in a persistent data directory, so they survive restarts. Pick the
+  active workbook and the active folder from dropdowns, drop screenshots into
+  the folder, and click **Process new images now**. Because the same `.xlsx`
+  file is reopened every time, its `Processing_History` tab keeps growing and
+  screenshots that were already read stay skipped across sessions. This is the
+  mode the hosted deployment exists for.
+- **One-off upload** — upload a workbook and one or more screenshots, click
+  **Process images**, then **Download updated workbook**. Nothing is kept
+  afterwards.
 - **Local folder (this machine only)** — same behavior as the command-line
-  tool: point at a folder and an Excel file by path, and it reads/writes
-  those files directly on disk. Only works when you're running the app on
-  your own computer (not a hosted deployment).
+  tool: point at a folder and an Excel file by path, and it reads/writes those
+  files directly on disk. Hidden on a hosted deployment, which has no access
+  to your drive.
 
-Either mode shows a **Processing history** panel (from the workbook's
+Every mode shows a **Processing history** panel (from the workbook's
 `Processing_History` tab) and a live summary of what was processed, skipped,
 or flagged for review.
 
-**Deploying to Streamlit Community Cloud:** push this folder to a GitHub
-repo and point Streamlit Cloud at `app.py`. The included `packages.txt`
-tells Streamlit Cloud to install Tesseract OCR automatically — no manual
-setup needed on their end. Use **Upload files** mode there, since a hosted
-app has no access to your local drive.
+## 4. Hosted deployment (Fly.io)
+
+The app is deployed at **https://bex-scl-tool.fly.dev/**.
+
+A hosted app cannot see your computer's disk, so **Saved library** mode is the
+one to use there: the reference workbook and the screenshot folders live on a
+Fly volume mounted at `/data` rather than on your laptop. You upload
+screenshots into a named folder once, and both the folder and the workbook are
+still there next session, history and all.
+
+To redeploy after changing the code:
+
+```
+cd Bex/scl_tool
+fly deploy --ha=false
+```
+
+`--ha=false` matters: Streamlit keeps each session's state inside the process
+serving it, so a second machine would be a second unshared copy of the app
+rather than extra capacity.
+
+The page is open: anyone with the URL can use it, and can download whichever
+workbook is currently saved on the volume. If you ever want a password in front
+of it, no code change is needed:
+
+```
+fly secrets set SCL_PASSWORD=your-password --app bex-scl-tool
+```
+
+Run `fly secrets unset SCL_PASSWORD` to go back to open.
+
+**Streamlit Community Cloud** is an alternative host: push this folder to a
+GitHub repo and point Streamlit Cloud at `app.py`. The included `packages.txt`
+tells it to install Tesseract OCR automatically. Note that it gives you no
+persistent disk, so only **One-off upload** mode is useful there.
 
 ### Option B — Command line
 
@@ -96,7 +131,7 @@ This opens a small menu:
 Pick **1** to scan the folder and fill in the workbook. You can also skip
 straight to processing with `python run.py process`.
 
-## What it does with each image
+## 5. What it does with each image
 
 - Reads the 6-row table (Membrane / Bending (Inside) / Bending (Outside) /
   Membrane+Bending (Inside) / Membrane+Bending (Center) / Membrane+Bending
@@ -120,7 +155,7 @@ straight to processing with `python run.py process`.
   they don't line up — useful if you ever point it at a differently laid
   out workbook.
 
-## Notes and limitations
+## 6. Notes and limitations
 
 - Works best on clean screen-captures like the sample you provided (crisp
   rendered text, not a photo of a screen). Very low-resolution or heavily
@@ -134,14 +169,19 @@ straight to processing with `python run.py process`.
   stores the two paths in plain text, so you can also edit it directly if
   you prefer.
 
-## Files in this folder
+## 7. Files in this folder
 
 | File | Purpose |
 |---|---|
 | `app.py` | Streamlit web UI |
 | `run.py` | Command-line menu / entry point |
 | `scl_core.py` | Extraction and Excel-writing logic (shared by both) |
+| `store.py` | Persistent server-side storage for Saved library mode |
 | `config.json` | Your saved folder + Excel paths (created on first use) |
 | `run.bat` / `run.sh` | Double-click launchers for the CLI, Windows / Mac-Linux |
 | `requirements.txt` | Python packages to install |
 | `packages.txt` | System package (Tesseract) for Streamlit Cloud deployment |
+| `Dockerfile` | Container image for the Fly.io deployment |
+| `entrypoint.sh` | Fixes volume ownership, then drops privileges |
+| `fly.toml` | Fly.io app config (volume, health check, scale-to-zero) |
+| `.dockerignore` | Keeps the desktop launchers out of the image |
