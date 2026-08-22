@@ -27,7 +27,8 @@
  *
  *   1. Sign in to the app as ADMIN_EMAIL in a browser
  *   2. DevTools -> Application -> Cookies -> copy the value of `mw_session`
- *   3. MW_SESSION=<value> pnpm queue
+ *   3. PowerShell:  $env:MW_SESSION='<value>'; pnpm queue
+ *      bash:        MW_SESSION=<value> pnpm queue
  *
  * The cookie is read from the environment and never written to disk here.
  */
@@ -38,8 +39,9 @@ const SESSION = process.env.MW_SESSION;
 if (!SESSION) {
   console.error(
     "MW_SESSION is not set.\n\n" +
-      "  Sign in as ADMIN_EMAIL, copy the `mw_session` cookie, then:\n" +
-      "  MW_SESSION=<value> pnpm queue\n",
+      "  Sign in as ADMIN_EMAIL, copy the `mw_session` cookie, then:\n\n" +
+      "  PowerShell:  $env:MW_SESSION='<value>'; pnpm queue\n" +
+      "  bash:        MW_SESSION=<value> pnpm queue\n",
   );
   process.exit(2);
 }
