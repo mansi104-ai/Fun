@@ -166,9 +166,11 @@ note — roughly a quarter of the removed length, still clears the finding.
 
 Do not resubmit until all four are true:
 
-1. `cd server && pnpm test` — 256 checks, including §19 (SEO agreement) and §20
+1. `cd server && pnpm test` — 265 checks, including §19 (SEO agreement) and §20
    (the app name, and where the scopes are disclosed).
-2. `pnpm deploy` has actually run and finished.
+2. `pnpm run deploy` has actually run and finished. Note the `run`: `deploy` is
+   a built-in pnpm command, so `pnpm deploy` runs that instead of this script
+   and fails with ERR_PNPM_NOTHING_TO_DEPLOY.
 3. `node scripts/e2e.mjs https://<live host>` passes §3 in full.
 4. The consent screen's app name and homepage URL match what is live.
 

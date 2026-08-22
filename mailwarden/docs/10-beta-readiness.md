@@ -15,7 +15,7 @@ Status as of 10 August 2026. Live at <https://mailwarden.fly.dev>.
 | Payments | UPI at 0% fee, Stripe wired and dormant, seat cap enforced twice |
 | Marketing | Landing, pricing, OG image, touch icon |
 | Ops | Fly deploy, health checks, `pnpm logs`, `pnpm e2e` |
-| Tests | 166 offline, 23 end-to-end against production |
+| Tests | 265 offline, 35 end-to-end against production |
 
 ---
 
@@ -134,8 +134,8 @@ the intended trade: missing clutter is recoverable, deleting a receipt is not.
 ```bash
 pnpm logs          # readable production logs
 pnpm logs:tail     # follow live
-pnpm e2e           # 23 checks against production
-pnpm deploy        # ship
+pnpm e2e           # 35 checks against production
+pnpm run deploy    # ship — `run` is required, `deploy` is a built-in pnpm command
 pnpm status        # machine health
-cd server && pnpm exec tsx --env-file=../.env src/smoke.ts   # 166 offline checks
+cd server && pnpm test                                       # 265 offline checks
 ```
