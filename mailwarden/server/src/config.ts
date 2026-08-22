@@ -115,6 +115,24 @@ export const config = {
    */
   notifyWebhookUrl: process.env.NOTIFY_WEBHOOK_URL ?? "",
 
+  /**
+   * Operator alerts by email, via Resend's HTTP API.
+   *
+   * Independent of the webhook, not a fallback for it: both fire when both are
+   * configured. Email is the channel the operator actually checks; the webhook
+   * is the one that reaches a phone in minutes.
+   *
+   * `from` defaults to Resend's shared onboarding sender, which needs no domain
+   * and no DNS records but may ONLY deliver to the address that owns the Resend
+   * account. That is the operator, so it works on day one. Point it at a
+   * verified domain later if these alerts ever need to reach anyone else.
+   */
+  alertEmail: {
+    resendApiKey: process.env.RESEND_API_KEY ?? "",
+    to: (process.env.ALERT_EMAIL_TO ?? "").trim(),
+    from: optional("ALERT_EMAIL_FROM", "Mailwarden <onboarding@resend.dev>"),
+  },
+
   databasePath: optional("DATABASE_PATH", "./mailwarden.db"),
 
   /** Gmail messages.get quota is the sync bottleneck; keep concurrency modest. */

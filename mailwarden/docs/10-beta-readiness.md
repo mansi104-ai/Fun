@@ -49,10 +49,46 @@ reports what it verified, so a mismatch is real information, not noise.
    in as the operator, and `/admin.html` stays unreachable.
 2. **Add the redirect URI** if you have not:
    `https://mailwarden.fly.dev/auth/google/callback`
-3. **Set a notification webhook** so access requests do not sit unread:
+3. **Turn on an alert channel** so access requests do not sit unread. Either or
+   both; with neither, they only reach the server log.
+
+   Email (Resend — free tier 3,000/month, sign up and take a key from
+   resend.com/api-keys). The default sender needs no domain, but Resend will
+   only deliver from it to the address that owns the Resend account, so sign up
+   with the address you want alerted:
+   ```bash
+   flyctl secrets set --app mailwarden \
+     RESEND_API_KEY='re_...' \
+     ALERT_EMAIL_TO='mkb.kalra@gmail.com'
+   ```
+
+   Phone push, via a chat webhook:
    ```bash
    flyctl secrets set --app mailwarden \
      NOTIFY_WEBHOOK_URL='https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID>'
+   ```
+
+   Verify without waiting for a real visitor — this hits the public endpoint,
+   so it also leaves a row in the queue you should delete afterwards.
+
+   PowerShell (note: `curl` there is an alias for `Invoke-WebRequest` and will
+   not accept `-H`/`-d` — use `Invoke-RestMethod`, or spell it `curl.exe`):
+   ```powershell
+   Invoke-RestMethod -Method Post -Uri https://mailwarden.fly.dev/api/access-request `
+     -ContentType 'application/json' `
+     -Body '{"email":"alert-test@example.com","note":"checking alerts"}'
+   ```
+
+   bash:
+   ```bash
+   curl -X POST https://mailwarden.fly.dev/api/access-request \
+     -H 'Content-Type: application/json' \
+     -d '{"email":"alert-test@example.com","note":"checking alerts"}'
+   ```
+
+   Then clean up the test row:
+   ```bash
+   flyctl ssh console --app mailwarden -C "sqlite3 /data/mailwarden.db \"DELETE FROM access_requests WHERE email = 'alert-test@example.com'\""
    ```
 4. **Submit OAuth verification.** Free, 4–6 weeks, and it is the long pole on
    ever passing 100 users. Privacy policy and terms now exist, which were the

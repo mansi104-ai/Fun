@@ -238,10 +238,12 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
           c: number;
         }
       ).c;
+      // The address goes in the title, not just the detail: the title becomes
+      // the email subject, and the subject is often all that gets read.
       notifyOperator(
         "access_request",
-        "Someone wants access",
-        `${email} — ${waiting} waiting. Add them at console.cloud.google.com -> OAuth consent screen -> Test users.`,
+        `${email} wants access`,
+        `${waiting} waiting. Add them at console.cloud.google.com -> OAuth consent screen -> Test users.`,
       );
       return { ok: true, waiting };
     },
