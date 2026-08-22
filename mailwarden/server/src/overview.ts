@@ -56,6 +56,8 @@ export interface SenderCard {
   holdReason: string | null;
   hasUnsubscribe: boolean;
   userProtected: number;
+  /** 1 when the user moved this sender into Clean themselves. */
+  userPromoted: number;
 }
 
 export interface Overview {
@@ -91,6 +93,7 @@ interface SenderRow {
   has_unsubscribe: number;
   user_replied: number;
   user_protected: number;
+  user_promoted: number;
   protected: number;
   decision_count: number | null;
   classified_by: string | null;
@@ -101,7 +104,7 @@ const loadSenders = (accountId: string): SenderRow[] =>
     .prepare(
       `SELECT sender_key, display_name, category, confidence, message_count, unread_count,
               total_bytes, last_seen, has_unsubscribe, user_replied, user_protected,
-              protected, decision_count, classified_by
+              user_promoted, protected, decision_count, classified_by
        FROM senders WHERE account_id = ? AND message_count > 0
        ORDER BY message_count DESC`,
     )
@@ -138,11 +141,55 @@ export function evidenceFor(s: SenderRow): string[] {
 const isProtectedSender = (s: SenderRow): boolean =>
   s.user_protected === 1 || (s.protected === 1 && s.user_protected !== -1) || s.user_replied === 1;
 
-/** safe | review | protected, using the same thresholds the guards enforce. */
+/**
+ * safe | review | protected, using the same thresholds the guards enforce.
+ *
+ * Precedence, strictest first:
+ *
+ *   1. Replied-to and user-pinned senders are protected, and no user override
+ *      reaches them. The guard layer enforces the same thing independently
+ *      (safety/policy.ts) — this is the view agreeing with it, not deciding it.
+ *   2. The hard confidence floor, which is likewise absolute: "below this a
+ *      sender cannot be actioned at all, even on request" (safety/limits.ts).
+ *   3. A sender the user promoted is SAFE. This is the one bar a user may
+ *      clear for themselves, and only this one — the *suggest* floor governs
+ *      what Mailwarden proposes unprompted, never what the user may choose.
+ *   4. Otherwise the automatic rules.
+ *
+ * The two overrides must sit on the correct side of the guards or the UI lies.
+ * Promoting past a rule the guard layer still enforces would file the sender
+ * under Clean and then strip every one of its messages at plan time, leaving a
+ * card that reads "Archive 0". Hence promotion is *refused* in those cases
+ * rather than accepted and quietly nullified — see `promotionRefusal`.
+ *
+ * Promotion moves a sender between tabs. It cannot make a single extra message
+ * eligible: `actionableCount` still comes from a real dry run of the policy,
+ * so starred, attached, and recent mail is held back exactly as before.
+ */
 export function stateOf(s: SenderRow): "safe" | "review" | "protected" {
   if (isProtectedSender(s)) return "protected";
   if ((s.confidence ?? 0) < LIMITS.hardConfidenceFloor) return "protected";
+  if (s.user_promoted === 1) return "safe";
   return isSuggestable(s.category, s.confidence) ? "safe" : "review";
+}
+
+/**
+ * Whether the user may move this sender into Clean, and if not, why.
+ *
+ * Both refusals mirror a guard that promotion cannot reach. Refusing with the
+ * reason is the honest answer; accepting and producing an un-actionable Clean
+ * card is not.
+ */
+export function promotionRefusal(
+  s: Pick<SenderRow, "user_replied" | "confidence">,
+): string | null {
+  if (s.user_replied === 1) {
+    return "You have replied to this sender, so Mailwarden will not bulk-act on it. Act on it in Gmail instead.";
+  }
+  if ((s.confidence ?? 0) < LIMITS.hardConfidenceFloor) {
+    return "Mailwarden does not understand this sender well enough to act on it in bulk, even on request. Clean it in Gmail instead.";
+  }
+  return null;
 }
 
 export function computeOverview(accountId: string): Overview {
@@ -324,6 +371,7 @@ export function sendersInState(
       holdReason: holdReason.get(s.sender_key) ?? null,
       hasUnsubscribe: Boolean(s.has_unsubscribe),
       userProtected: s.user_protected,
+      userPromoted: s.user_promoted,
     }))
     .sort((a, b) =>
       state === "protected"

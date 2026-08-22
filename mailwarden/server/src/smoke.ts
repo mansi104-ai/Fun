@@ -24,7 +24,7 @@ import { aggregateSenders } from "./gmail/sync.js";
 import { isPubliclyRoutable, parseTargets } from "./gmail/unsubscribe.js";
 import { analyticsSummary, recordWebEvent } from "./analytics.js";
 import { newId } from "./lib/crypto.js";
-import { sendersInState } from "./overview.js";
+import { promotionRefusal, sendersInState, stateOf } from "./overview.js";
 import { config } from "./config.js";
 import { FOUNDING_SEATS, foundingSeatsSold, grantManual, isAdmin, requestAccess } from "./lib/billing.js";
 import { canExecuteBatch, entitlementsFor, setPlan } from "./lib/entitlements.js";
@@ -215,6 +215,84 @@ check("…but release can NEVER override the replied-to rule", releasedReply.all
 
 // Restore for later assertions.
 db.prepare(`UPDATE senders SET user_protected = 0 WHERE account_id = ?`).run(accountId);
+
+section("5a. User promotion: moving senders into Clean");
+
+// A review-grade sender: past the hard floor, short of the suggest bar.
+addSender("midconf@shop.example", { confidence: 0.55, category: "promotional" });
+addMessages("midconf@shop.example", 6);
+
+const rowFor = (key: string): Record<string, unknown> =>
+  db.prepare(`SELECT * FROM senders WHERE account_id = ? AND sender_key = ?`)
+    .get(accountId, key) as Record<string, unknown>;
+
+check(
+  "A sender below the suggest bar starts in Review",
+  stateOf(rowFor("midconf@shop.example") as never) === "review",
+);
+
+db.prepare(`UPDATE senders SET user_promoted = 1, user_protected = -1
+            WHERE account_id = ? AND sender_key = ?`).run(accountId, "midconf@shop.example");
+check(
+  "…and moves to Clean once the user promotes it",
+  stateOf(rowFor("midconf@shop.example") as never) === "safe",
+);
+
+// The point of the feature: promotion must not be cosmetic. If the sender
+// shows up in Clean, the engine has to actually act on it.
+const promotedRun = evaluate({
+  accountId, action: "archive", senderKeys: ["midconf@shop.example"],
+  candidates: candidates("midconf@shop.example"), confirmed: true,
+});
+check("…and the guards then let its mail through", promotedRun.allowed.length === 6);
+
+// Promotion is a tab move, never a licence. Every per-message guard still runs.
+addMessages("midconf@shop.example", 3, RECENT);
+const promotedRecent = evaluate({
+  accountId, action: "archive", senderKeys: ["midconf@shop.example"],
+  candidates: candidates("midconf@shop.example"), confirmed: true,
+});
+check(
+  "…but recent mail from a promoted sender is still held back",
+  promotedRecent.allowed.length === 6,
+  `${promotedRecent.allowed.length} of 9 allowed`,
+);
+
+// The two refusals, which exist so promotion can never produce a Clean card
+// the engine will strip to nothing.
+check(
+  "Promotion is refused for a replied-to sender",
+  promotionRefusal({ user_replied: 1, confidence: 0.95 }) !== null,
+);
+check(
+  "Promotion is refused below the hard confidence floor",
+  promotionRefusal({ user_replied: 0, confidence: LIMITS.hardConfidenceFloor - 0.01 }) !== null,
+);
+check(
+  "…and allowed for an ordinary review-grade sender",
+  promotionRefusal({ user_replied: 0, confidence: 0.55 }) === null,
+);
+
+// A promoted sender that is later pinned must not reappear in Clean when the
+// pin comes off — the two overrides have to stay consistent.
+db.prepare(`UPDATE senders SET user_protected = 1, user_promoted = 0
+            WHERE account_id = ? AND sender_key = ?`).run(accountId, "midconf@shop.example");
+check(
+  "Pinning a promoted sender protects it",
+  stateOf(rowFor("midconf@shop.example") as never) === "protected",
+);
+db.prepare(`UPDATE senders SET user_protected = 0 WHERE account_id = ? AND sender_key = ?`)
+  .run(accountId, "midconf@shop.example");
+check(
+  "…and unpinning returns it to Review, not Clean",
+  stateOf(rowFor("midconf@shop.example") as never) === "review",
+);
+
+// Leave nothing behind for the sections that follow.
+db.prepare(`DELETE FROM messages_meta WHERE account_id = ? AND sender_key = ?`)
+  .run(accountId, "midconf@shop.example");
+db.prepare(`DELETE FROM senders WHERE account_id = ? AND sender_key = ?`)
+  .run(accountId, "midconf@shop.example");
 
 section("6. Guardrail: confidence floor");
 

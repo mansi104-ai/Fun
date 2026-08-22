@@ -141,6 +141,19 @@ function addColumn(table: string, column: string, definition: string): void {
 //   0  = no override; automatic classification governs
 addColumn("senders", "user_protected", "INTEGER NOT NULL DEFAULT 0");
 
+// The other half of the same idea: the user moving a sender INTO Clean.
+//
+// Separate from user_protected rather than another value on it, because the
+// two answer different questions — "should this be held back?" and "has the
+// user vouched for this?" — and only the first is consulted by the guards.
+//
+// Promotion changes which tab a sender appears in. It does NOT loosen a single
+// per-message guard: starred, attached, and recent mail is still excluded at
+// plan time, and a replied-to sender is never promotable at all. See
+// safety/limits.ts — "below this confidence a sender is never *suggested*.
+// Users may still choose it."
+addColumn("senders", "user_promoted", "INTEGER NOT NULL DEFAULT 0");
+
 // Iteration 48 — the guard verdict recorded at plan time, so the receipt and
 // the audit trail can show exactly which rules ran and what they excluded.
 addColumn("batches", "guard_report", "TEXT");

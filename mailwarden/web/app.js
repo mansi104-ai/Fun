@@ -320,6 +320,152 @@ const stateCard = (state, label, messages, senders, note) => `
     <div class="state-note">${esc(note)}${senders ? ` · ${fmt.format(senders)} sender${senders === 1 ? "" : "s"}` : ""}</div>
   </button>`;
 
+// ── Multi-select ─────────────────────────────────────────────────────
+//
+// One decision per sender was the original model, and it is still the right
+// default — the evidence lines only mean something read one at a time. But a
+// mailbox with sixty dead newsletters turns that into sixty clicks, so the
+// lists also allow picking a group and acting on it once.
+//
+// Selection is deliberately NOT persisted across tabs or reloads. A stale
+// selection acting on senders the user can no longer see is exactly the kind
+// of surprise this product exists to avoid.
+
+// Every query below is scoped to the view being rendered, never to the
+// document. `show()` only toggles a class, so the previous tab's markup is
+// still in the DOM — a document-wide lookup finds the hidden tab's controls
+// first and wires them instead of the visible ones.
+let picked = new Set();
+let pickable = [];
+let pickRoot = null;
+
+function resetSelection(senders, rootId) {
+  picked = new Set();
+  pickable = senders;
+  pickRoot = $(rootId);
+}
+
+const pickedSenders = () => pickable.filter((s) => picked.has(s.senderKey));
+
+/**
+ * The sticky action bar. Always present once there is more than one sender to
+ * choose between, with its actions disabled at zero picked — a control that
+ * appears only after you discover it is a control nobody discovers.
+ */
+function selectionBar(kind) {
+  if (pickable.length < 2) return "";
+  const acts = kind === "protected"
+    ? `<button data-bulk="clean">Move to Clean</button>
+       <button data-bulk="auto">Stop protecting</button>`
+    : `${kind === "review" ? `<button data-bulk="clean">Move to Clean</button>` : ""}
+       <button class="primary" data-bulk="archive">Archive</button>
+       <button class="danger" data-bulk="trash">Delete</button>
+       <button data-bulk="protected">Protect</button>`;
+  return `
+    <div class="selbar">
+      <label class="pick" style="align-items:center">
+        <input type="checkbox" class="pick-all" aria-label="Select every sender">
+        <span class="n pick-n">Select all</span>
+      </label>
+      <span class="grow"></span>
+      ${acts}
+    </div>`;
+}
+
+/** Reflect `picked` into the bar, the buttons, and the card outlines. */
+function syncSelection() {
+  const bar = pickRoot?.querySelector(".selbar");
+  if (!bar) return;
+
+  const chosen = pickedSenders();
+  const none = chosen.length === 0;
+  const archiveN = chosen.reduce((n, s) => n + (s.actionableCount ?? 0), 0);
+  const deleteN = chosen.reduce((n, s) => n + (s.deletableCount ?? 0), 0);
+
+  bar.querySelector(".pick-n").textContent = none
+    ? "Select all"
+    : `${fmt.format(chosen.length)} sender${chosen.length === 1 ? "" : "s"}`
+      + (archiveN ? ` · ${fmt.format(archiveN)} emails` : "");
+
+  const all = bar.querySelector(".pick-all");
+  all.checked = !none && chosen.length === pickable.length;
+  all.indeterminate = !none && chosen.length < pickable.length;
+
+  for (const b of bar.querySelectorAll("[data-bulk]")) {
+    const act = b.dataset.bulk;
+    // Counts on the buttons, so the size of the action is visible before it is
+    // taken. The server's plan is still what the confirm dialog reports.
+    if (act === "archive") b.textContent = archiveN ? `Archive ${fmt.format(archiveN)}` : "Archive";
+    if (act === "trash") b.textContent = deleteN ? `Delete ${fmt.format(deleteN)}` : "Delete";
+    b.disabled = none || (act === "archive" && !archiveN) || (act === "trash" && !deleteN);
+  }
+
+  for (const el of pickRoot.querySelectorAll("[data-pick]")) {
+    const card = el.closest(".sender");
+    if (card) card.classList.toggle("picked", picked.has(el.dataset.pick));
+  }
+}
+
+function wireSelection(reload) {
+  const bar = pickRoot?.querySelector(".selbar");
+  if (!bar) return;
+
+  for (const el of pickRoot.querySelectorAll("[data-pick]")) {
+    el.onchange = () => {
+      if (el.checked) picked.add(el.dataset.pick);
+      else picked.delete(el.dataset.pick);
+      syncSelection();
+    };
+  }
+
+  bar.querySelector(".pick-all").onchange = (e) => {
+    const on = e.target.checked;
+    picked = on ? new Set(pickable.map((s) => s.senderKey)) : new Set();
+    for (const el of pickRoot.querySelectorAll("[data-pick]")) el.checked = on;
+    syncSelection();
+  };
+
+  for (const b of bar.querySelectorAll("[data-bulk]")) {
+    b.onclick = () => {
+      const keys = [...picked];
+      if (keys.length === 0) return;
+      const act = b.dataset.bulk;
+      if (act === "archive" || act === "trash") return runSenders(keys, act, reload);
+      return setPlacement(b, keys, act);
+    };
+  }
+
+  syncSelection();
+}
+
+/**
+ * Move a group of senders between tabs.
+ *
+ * Refusals come back per sender and are shown rather than swallowed — a
+ * request that half-worked has to say which half.
+ */
+async function setPlacement(button, senderKeys, state) {
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "Working…";
+  try {
+    const res = await api("/api/senders/placement", { method: "POST", body: { senderKeys, state } });
+    if (res.refused.length > 0) {
+      alert(
+        `${res.moved.length} moved. ${res.refused.length} could not be:\n\n`
+          + res.refused.slice(0, 6).map((r) => `• ${r.senderKey}\n  ${r.reason}`).join("\n\n"),
+      );
+    }
+    overview = await api("/api/overview");
+    renderTabs();
+    await goTab(tab);
+  } catch (err) {
+    button.disabled = false;
+    button.textContent = label;
+    alert(`Could not move those senders: ${err.message}`);
+  }
+}
+
 // ── Clean / Review lists ─────────────────────────────────────────────
 
 async function renderList(state) {
@@ -341,6 +487,7 @@ async function renderList(state) {
     return;
   }
 
+  resetSelection(actionable, "list");
   const total = actionable.reduce((n, s) => n + s.actionableCount, 0);
   $("list").innerHTML = `
     <h1>${state === "safe" ? "Safe to clean" : "Needs your decision"}</h1>
@@ -352,10 +499,12 @@ async function renderList(state) {
     <div class="row" style="margin-bottom:18px">
       <button class="primary" id="startReview">Go through them one at a time</button>
     </div>
+    ${selectionBar(state === "safe" ? "safe" : "review")}
     ${actionable.map((s) => senderCard(s, state)).join("")}`;
 
   $("startReview").onclick = () => startReview(actionable, state);
-  wireSenderCards();
+  wireSenderCards($("list"));
+  wireSelection(() => renderList(state));
 }
 
 function senderCard(s, state) {
@@ -364,12 +513,15 @@ function senderCard(s, state) {
   return `
   <article class="sender">
     <div class="sender-top">
-      <div>
-        <div class="sender-name">${esc(name)}</div>
-        <div class="sender-meta">
-          ${esc(s.category ?? "unsorted")} · ${mb(s.totalBytes)} · ${unread}% unread
+      <label class="pick">
+        <input type="checkbox" data-pick="${esc(s.senderKey)}" aria-label="Select ${esc(name)}">
+        <div>
+          <div class="sender-name">${esc(name)}</div>
+          <div class="sender-meta">
+            ${esc(s.category ?? "unsorted")} · ${mb(s.totalBytes)} · ${unread}% unread
+          </div>
         </div>
-      </div>
+      </label>
       <div class="sender-n">${fmt.format(s.actionableCount)}</div>
     </div>
 
@@ -378,25 +530,31 @@ function senderCard(s, state) {
       ${s.evidence.map((e) => `<li><span class="mark" aria-hidden="true">✓</span><span>${esc(e)}</span></li>`).join("")}
     </ul>`}
 
+    ${s.userPromoted === 1
+      ? `<p class="hint" style="margin:10px 0 0">You moved this sender into Clean.</p>` : ""}
+
     <div class="sender-actions">
       <button class="primary" data-act="archive" data-key="${esc(s.senderKey)}">
         Archive ${fmt.format(s.actionableCount)}</button>
       ${s.deletableCount ? `<button class="danger" data-act="trash" data-key="${esc(s.senderKey)}">
         Delete ${fmt.format(s.deletableCount)}</button>` : ""}
       <button data-act="read" data-key="${esc(s.senderKey)}">Read</button>
+      ${state === "review"
+        ? `<button data-act="clean" data-key="${esc(s.senderKey)}">Move to Clean</button>` : ""}
       <button data-act="protect" data-key="${esc(s.senderKey)}">Always protect</button>
       ${s.hasUnsubscribe ? `<button data-act="unsub" data-key="${esc(s.senderKey)}">Unsubscribe</button>` : ""}
     </div>
   </article>`;
 }
 
-function wireSenderCards() {
-  for (const el of document.querySelectorAll("[data-act]")) {
+function wireSenderCards(root) {
+  for (const el of root.querySelectorAll("[data-act]")) {
     el.onclick = () => {
       const { act, key } = el.dataset;
       if (act === "archive") return runSenders([key], "archive");
       if (act === "trash") return runSenders([key], "trash");
       if (act === "read") return openReader(key);
+      if (act === "clean") return setPlacement(el, [key], "clean");
       if (act === "protect") return protectSender(el, key);
       if (act === "unsub") return runUnsubscribe(el, key);
     };
@@ -510,6 +668,11 @@ async function renderProtected() {
 
   const { senders } = await api("/api/senders/state?state=protected");
 
+  // Only what is on screen is selectable — "Select all" must never reach a
+  // sender the user cannot see.
+  const shown = senders.slice(0, 60);
+  resetSelection(shown, "protectedView");
+
   $("protectedView").innerHTML = `
     <h1>${fmt.format(o.protected.messages)} emails protected</h1>
     <p class="lede">
@@ -529,13 +692,18 @@ async function renderProtected() {
     <h2>Protected senders</h2>
     ${senders.length === 0
       ? `<p class="hint">No senders are protected at the moment.</p>`
-      : senders.slice(0, 60).map((s) => `
+      : `${selectionBar("protected")}
+      ${shown.map((s) => `
       <article class="sender">
         <div class="sender-top">
-          <div>
-            <div class="sender-name">${esc(s.displayName || s.senderKey)}</div>
-            <div class="sender-meta">${esc(s.category ?? "unsorted")} · ${mb(s.totalBytes)}</div>
-          </div>
+          <label class="pick">
+            <input type="checkbox" data-pick="${esc(s.senderKey)}"
+                   aria-label="Select ${esc(s.displayName || s.senderKey)}">
+            <div>
+              <div class="sender-name">${esc(s.displayName || s.senderKey)}</div>
+              <div class="sender-meta">${esc(s.category ?? "unsorted")} · ${mb(s.totalBytes)}</div>
+            </div>
+          </label>
           <div class="sender-n">${fmt.format(s.messageCount)}</div>
         </div>
         <ul class="evidence held">
@@ -544,21 +712,23 @@ async function renderProtected() {
         </ul>
         <div class="sender-actions">
           <button data-act="read" data-key="${esc(s.senderKey)}">Read</button>
+          <button data-act="clean" data-key="${esc(s.senderKey)}">Move to Clean</button>
           ${s.userProtected === 1
             ? `<button data-act="unpin" data-key="${esc(s.senderKey)}">Stop protecting</button>`
-            : `<button data-act="release" data-key="${esc(s.senderKey)}">Let me act on this</button>`}
+            : ""}
         </div>
-      </article>`).join("")}
+      </article>`).join("")}`}
     ${senders.length > 60 ? `<p class="hint">Showing the 60 largest of ${senders.length}.</p>` : ""}`;
 
-  for (const el of document.querySelectorAll("[data-act]")) {
+  for (const el of $("protectedView").querySelectorAll("[data-act]")) {
     el.onclick = () => {
       const { act, key } = el.dataset;
       if (act === "read") return openReader(key);
+      if (act === "clean") return setPlacement(el, [key], "clean");
       if (act === "unpin") return setProtection(el, key, "auto");
-      if (act === "release") return setProtection(el, key, "release");
     };
   }
+  wireSelection(() => renderProtected());
 }
 
 // ── History ──────────────────────────────────────────────────────────
@@ -656,7 +826,7 @@ async function renderUnsub() {
           <button data-act="read" data-key="${esc(s.senderKey)}">Read</button>
         </div>
       </article>`).join("")}`;
-  wireSenderCards();
+  wireSenderCards($("list"));
 }
 
 // ── Settings ─────────────────────────────────────────────────────────

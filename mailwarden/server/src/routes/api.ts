@@ -12,7 +12,7 @@ import {
   recordFreeBatchUse,
 } from "../lib/entitlements.js";
 import { computeCategories, senderKeysForCategory } from "../categories.js";
-import { computeOverview, sendersInState } from "../overview.js";
+import { computeOverview, promotionRefusal, sendersInState } from "../overview.js";
 import { computeRecipes, recipeById } from "../recipes.js";
 import { LIMITS } from "../safety/limits.js";
 import { GuardError } from "../safety/policy.js";
@@ -580,13 +580,98 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: "invalid_request" });
       }
 
+      // Pinning or resetting also clears any promotion, so the two overrides
+      // can never disagree. Without this, unpinning a sender that had once
+      // been promoted would drop it straight back into Clean rather than
+      // returning it to its automatic state. Releasing leaves it alone —
+      // release says nothing about whether the user vouched for the sender.
       const res = db
-        .prepare(`UPDATE senders SET user_protected = ? WHERE account_id = ? AND sender_key = ?`)
+        .prepare(
+          `UPDATE senders SET user_protected = ?${value === -1 ? "" : ", user_promoted = 0"}
+           WHERE account_id = ? AND sender_key = ?`,
+        )
         .run(value, ctx.accountId, senderKey);
       if (res.changes === 0) return reply.code(404).send({ error: "sender_not_found" });
 
       audit(ctx.userId, "sender.protection_changed", { senderKey, state });
       return { senderKey, userProtected: value };
+    },
+  );
+
+  /**
+   * Where senders live — the bulk, three-way version of the above.
+   *
+   *   clean      the user vouches for these; show them in Clean
+   *   protected  pin, permanently
+   *   auto       forget both overrides and let classification govern
+   *
+   * Bulk because the single-sender form made moving a group a click per row,
+   * which is the same reason the lists gained multi-select.
+   *
+   * Promoting also RELEASES any protection on the sender: "put this in Clean"
+   * plainly means both halves, and leaving the pin set would file the sender
+   * under Protected the moment the page reloaded.
+   *
+   * Refusals are per-sender and reported, never silent. A replied-to sender
+   * cannot be promoted at all — the guard layer would strip every one of its
+   * messages regardless, so the honest answer is no with a reason.
+   */
+  app.post<{ Body: { senderKeys?: string[]; state?: "clean" | "protected" | "auto" } }>(
+    "/api/senders/placement",
+    async (req, reply) => {
+      const ctx = requireAccount(req, reply);
+      if (!ctx) return;
+
+      const { senderKeys, state } = req.body ?? {};
+      if (!Array.isArray(senderKeys) || senderKeys.length === 0) {
+        return reply.code(400).send({ error: "no_senders" });
+      }
+      if (state !== "clean" && state !== "protected" && state !== "auto") {
+        return reply.code(400).send({ error: "invalid_state" });
+      }
+      if (senderKeys.length > LIMITS.maxSendersPerBatch) {
+        return reply.code(400).send({
+          error: "too_many_senders",
+          message: `${senderKeys.length} senders in one change; the limit is ${LIMITS.maxSendersPerBatch}.`,
+        });
+      }
+
+      const keys = [...new Set(senderKeys.map(String))];
+      const rows = db
+        .prepare(
+          `SELECT sender_key, user_replied, confidence FROM senders
+           WHERE account_id = ? AND sender_key IN (${keys.map(() => "?").join(",")})`,
+        )
+        .all(ctx.accountId, ...keys) as
+        { sender_key: string; user_replied: number; confidence: number | null }[];
+
+      const found = new Map(rows.map((r) => [r.sender_key, r]));
+      const refused: { senderKey: string; reason: string }[] = [];
+      const moving: string[] = [];
+
+      for (const key of keys) {
+        const row = found.get(key);
+        if (!row) {
+          refused.push({ senderKey: key, reason: "That sender is not in this mailbox." });
+          continue;
+        }
+        const refusal = state === "clean" ? promotionRefusal(row) : null;
+        if (refusal) refused.push({ senderKey: key, reason: refusal });
+        else moving.push(key);
+      }
+
+      if (moving.length > 0) {
+        const [promoted, protectedValue] =
+          state === "clean" ? [1, -1] : state === "protected" ? [0, 1] : [0, 0];
+        const holes = moving.map(() => "?").join(",");
+        db.prepare(
+          `UPDATE senders SET user_promoted = ?, user_protected = ?
+           WHERE account_id = ? AND sender_key IN (${holes})`,
+        ).run(promoted, protectedValue, ctx.accountId, ...moving);
+        audit(ctx.userId, "sender.placement_changed", { state, senders: moving.length });
+      }
+
+      return { state, moved: moving, refused };
     },
   );
 
