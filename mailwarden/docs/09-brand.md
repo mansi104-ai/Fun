@@ -154,7 +154,7 @@ Raster files cannot be produced here; export from the original artwork into
 
 ---
 
-## 7. mailwarden.ai
+## 7. mailwarden.xyz
 
 Production runs on `mailwarden.fly.dev`. **This is now a launch blocker, not a
 preference:** Google rejected OAuth verification with *"the website of your
@@ -162,9 +162,10 @@ homepage URL is not registered to you"*. A `*.fly.dev` subdomain is registered
 to Fly.io, and no amount of Search Console verification changes whose name is
 on the registration.
 
-The site's own 25 self-references move in one command:
+`mailwarden.xyz` was registered at Namecheap on 2026-09-03, and the site's own
+25 self-references have already been moved onto it with:
 
-    node scripts/set-domain.mjs https://mailwarden.ai
+    node scripts/set-domain.mjs https://mailwarden.xyz
 
 It rewrites every canonical, `og:url`, sitemap entry and robots directive, and
 refuses to run if it finds the tree already holding two different self-origins.
@@ -172,11 +173,11 @@ Smoke §19 fails the build if they ever disagree.
 
 Then five things the script cannot do for you:
 
-1. `flyctl certs add mailwarden.ai`
-2. `flyctl secrets set APP_URL=https://mailwarden.ai`
-3. Google Cloud → Credentials → add `https://mailwarden.ai/auth/google/callback`
-4. Google Cloud → OAuth consent screen → set the homepage to `https://mailwarden.ai`
-5. Search Console → verify the domain → submit `https://mailwarden.ai/sitemap.xml`
+1. `flyctl certs add mailwarden.xyz`
+2. `flyctl secrets set APP_URL=https://mailwarden.xyz`
+3. Google Cloud → Credentials → add `https://mailwarden.xyz/auth/google/callback`
+4. Google Cloud → OAuth consent screen → set the homepage to `https://mailwarden.xyz`
+5. Search Console → verify the domain → submit `https://mailwarden.xyz/sitemap.xml`
 
 Miss the third and OAuth breaks with `redirect_uri_mismatch` for everyone. Miss
 the fourth and the verification rejection stands, because the consent screen

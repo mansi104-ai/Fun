@@ -18,31 +18,41 @@ You do **not** need to wait for Google verification to make money.
 | CASA Tier 2 security assessment | **$540–$1,800/yr**, needed to go past 100 users |
 | **Testing mode** | **free, today, 100 real users** |
 
-Those 100 seats are not a waitlist. They are a business you can run tonight.
+> **Updated 3 September 2026.** Verification has cleared, the 100-user cap is
+> gone, and the Founding 100 tier was retired with zero seats sold — it was sold
+> on that cap being real, and it no longer is. Sign-up is open to anyone.
 
-**At $49 a seat, CASA is covered by 11–37 customers.** Not 100. You are about a
-dozen sales from being fully funded, and every one of those sales can happen
-before Google finishes anything.
+**The funding maths got harder, and that is the honest headline.** At $49 a
+seat, CASA Tier 2 was 11–37 customers. At **₹299 a Backlog Pass** it is roughly
+**150–500 sales** — the cap is gone, so there is no ceiling on reaching that,
+but there is also no longer a dozen-sale shortcut to being funded.
 
-The 100-user cap is also the most honest scarcity claim you will ever get to
-make. "Only 100 exist" is true, imposed on you rather than invented, and you can
-say exactly why on the page.
+What replaces the scarcity claim is the verification itself: an app Google has
+actually reviewed, holding a scope that cannot permanently delete anything.
+That is a slower pitch than "only 100 exist" and a considerably more durable
+one — and unlike the cap, it does not expire.
+
+Plan for CASA out of a few hundred sales, or out of pocket, rather than out of
+a dozen. Pricing rationale is in docs/02 §1.
 
 ---
 
 ## Step 0 — how much you actually lose to fees
 
-Measured against the funding target of ~$1,800 (37 founding seats at $49):
+Measured against the funding target of ~₹150,000 (roughly 500 Backlog Passes
+at ₹299):
 
-| Method | Fee per $49 seat | Total on 37 sales | Setup cost |
+| Method | Fee per ₹299 pass | Total on 500 sales | Setup cost |
 |---|---|---|---|
 | **UPI (India)** | **₹0** | **₹0** | none |
-| Stripe / Razorpay India | ~2% + 18% GST on the fee | ~$50 | GST registration, current account, business docs |
-| Stripe (US rates) | $1.72 (3.5%) | ~$64 | US entity — Stripe Atlas is $500 |
-| Lemon Squeezy / Paddle | $2.95 (6%) | ~$109 | none; they are merchant of record |
+| Stripe / Razorpay India | ~2% + 18% GST on the fee | ~₹3,500 | GST registration, current account, business docs |
+| Stripe (US rates) | ~₹10 (3.5%) | ~₹5,200 | US entity — Stripe Atlas is $500 |
+| Lemon Squeezy / Paddle | ~₹18 (6%) | ~₹9,000 | none; they are merchant of record |
 
-**The spread between card processors is about $50 across your entire funding
-target.** That is not worth optimising. Pick whichever you can actually open an
+**At ₹299 the fee spread matters more than it did at $49, and the manual cost
+matters more still.** UPI takes nothing, but every payment needs confirming by
+hand — at 500 sales that is 500 confirmations. The cheapest processor is the
+one that stops being your evening. Pick whichever you can actually open an
 account with fastest.
 
 **UPI is the real saving, and it is 100%.** It has zero merchant discount rate
@@ -73,8 +83,12 @@ The pricing page shows the UPI section only once `DIRECT_UPI_ID` is set —
 before that it stays hidden, because advertising a payment channel that is not
 configured fails *after* the buyer has already decided to pay.
 
-Keep `DIRECT_PAY_INR` roughly in step with $49, or simply price in INR for
-Indian buyers and treat them as a separate segment.
+Pricing is now INR-native, so there is nothing to keep in step with a dollar
+figure. `PRICE_INR_BACKLOG` (default 299) and `PRICE_INR_PRO` (default 149) are
+read per request, so a price change is an env var and a restart — not a deploy.
+The pricing page reads both from the server rather than hard-coding them: a
+figure printed in HTML that disagrees with what the QR asks for is the one
+discrepancy a buyer is guaranteed to notice.
 
 ### Granting a seat after a UPI payment
 
@@ -105,16 +119,16 @@ is, so always pass a real reference.
 
 1. Create an account at <https://dashboard.stripe.com/register>. Business
    details and a bank account are required; only you can do this.
-2. **Products → Add product**, three times:
+2. **Products → Add product**, twice:
 
-   | Product | Price | Type |
-   |---|---|---|
-   | Mailwarden Founding 100 | $49 | **One-time** |
-   | Mailwarden Starter | $19 | Recurring, yearly |
-   | Mailwarden Pro | $39 | Recurring, yearly |
+   | Product | Price | Type | Env var |
+   |---|---|---|---|
+   | Mailwarden Backlog Pass | ₹299 | **One-time** | `STRIPE_PRICE_ID_BACKLOG` |
+   | Mailwarden Pro | ₹149 | Recurring, monthly | `STRIPE_PRICE_ID_PRO` |
 
-   The founding price **must be one-time**, not recurring. A subscription there
-   would contradict "one payment, lifetime" on the pricing page.
+   The Backlog Pass **must be one-time**, not recurring. A subscription there
+   would contradict the entire argument for selling it — that clearing a backlog
+   is a job which ends, and should be charged for once.
 
 3. Copy each price id (`price_…`) and the secret key (`sk_live_…`).
 

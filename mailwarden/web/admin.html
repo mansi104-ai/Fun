@@ -68,6 +68,18 @@
   </div>
 
   <div id="panel" hidden>
+    <h2>Users</h2>
+    <p class="muted" style="margin-top:0" id="userSummary">Loading…</p>
+    <div class="card" style="padding:0; overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Email</th><th>Plan</th><th>Messages this window</th><th>Unsubs</th>
+          <th>Cleanups</th><th>Last scan</th><th>Joined</th>
+        </tr></thead>
+        <tbody id="users"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
     <h2>Traffic</h2>
     <p class="muted" style="margin-top:0">
       First-party and cookieless. A visitor is per-device and resets at midnight
@@ -99,8 +111,9 @@
 
     <h2>Waiting for access</h2>
     <p class="muted" style="margin-top:0">
-      Add each to <b>Google Cloud Console → OAuth consent screen → Test users</b>,
-      then email them that they are in.
+      Historical. OAuth verification has cleared, so sign-up is open to anyone and
+      nobody needs adding to a Test users list. Kept because these addresses asked
+      to be told when it opened — and now it has.
     </p>
     <div class="card" style="padding:0; overflow-x:auto">
       <table>

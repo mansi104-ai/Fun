@@ -54,7 +54,9 @@ Every batch is a **preview → explicit approve → execute → receipt** loop. 
 > **Unroll.me** makes you the product.
 > **Mailwarden** makes ~200 decisions on your behalf, shows you every one before it happens, and can undo all of them.
 
-**Price:** $19/yr entry — deliberately *under* Clean Email's $29.99 to make switching trivial, with a $39/yr tier that includes ongoing automation. We win on price at entry and on trust throughout.
+**Price:** ₹299 once for the Backlog Pass — against Clean Email at $29.99/yr (~₹2,500) and Mailstrom at $59.99/yr (~₹5,000), switching is not a decision anybody has to think about. ₹149/month Pro adds the ongoing automation. We win on price at entry and on trust throughout.
+
+The shape matters as much as the number. Every competitor here sells a subscription for a job that ends, which is why their churn is what it is. We charge once for the backlog and monthly only for the re-scan that genuinely recurs — see docs/02 §1.
 
 ## 5. Risks in This Analysis
 

@@ -60,6 +60,21 @@ app.addContentTypeParser(
 await app.register(cookie, { secret: config.sessionSecret });
 await app.register(fastifyStatic, { root: webRoot, prefix: "/" });
 
+/**
+ * `www` and the apex must not both serve the site. Every canonical tag names
+ * the apex, so a page answering on both is duplicate content advertising the
+ * other host — and a session cookie set on one host is not sent to the other,
+ * so a user who drifts between them is silently signed out.
+ *
+ * `hostname` excludes the port in Fastify 5, and `trustProxy` is on in
+ * production, so this reads the forwarded host rather than the machine's.
+ */
+app.addHook("onRequest", async (req, reply) => {
+  if (!req.hostname.startsWith("www.")) return;
+  const apex = req.hostname.slice(4);
+  return reply.redirect(new URL(req.url, `https://${apex}`).toString(), 301);
+});
+
 app.addHook("onSend", async (_req, reply) => {
   reply.header("X-Content-Type-Options", "nosniff");
   reply.header("Referrer-Policy", "strict-origin-when-cross-origin");

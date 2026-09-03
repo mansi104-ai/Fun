@@ -12,18 +12,49 @@
 
 | Plan | Price | What it is |
 |---|---|---|
-| **Free** | $0 | Full scan, full classification, **one complete sender cleanup executed for real**. No card. |
-| **Starter** | **$19/yr** | Unlimited senders and cleanups, higher-accuracy classification. |
-| **Pro** | **$39/yr** | + scheduled re-scans, unsubscribe verification, 5 accounts. |
-| **Founding 100** | **$49 once, lifetime** | Everything in Pro, forever. Only 100 exist. |
+| **Free** | ₹0 | Full scan, full classification, **1,000 messages cleaned per month**, 3 unsubscribes. No card. |
+| **Backlog Pass** | **₹299 once** | 50,000 messages and 50 unsubscribes, 60 days. The job. |
+| **Pro** | **₹149/month** | Scheduled re-scans, 25,000 messages and 25 unsubscribes a month, 5 accounts. The habit. |
 
-**Why $19 entry:** Clean Email is $29.99/yr and Mailstrom is $59.99/yr. At $19 the switching decision stops being a decision. We do not compete on features at the entry tier — we compete on trust and on the sender-level UX, and we price so that trying us is cheaper than thinking about it.
+> **Superseded 3 September 2026.** The table above is current. The dollar
+> pricing this section used to carry — $19/yr Starter, $39/yr Pro, $49 Founding
+> 100 — was retired, for three reasons worth keeping:
+>
+> 1. **The audience is Indian and the price was a straight currency
+>    conversion.** ₹1,499/month is what $19 became, and it is not a number this
+>    market pays for a mail utility.
+> 2. **Metering by "cleanup" was the wrong unit.** A batch is not something
+>    anybody experiences; a mailbox of 5,400 promotional messages is. Volume is
+>    both what the user consumes and what costs us to serve.
+> 3. **Founding 100 rested on a condition that has now expired.** It was sold
+>    on Google's 100-user Testing cap — "the scarcity is real, not
+>    manufactured". Verification cleared, so it is retired rather than
+>    converted into invented scarcity. Zero seats had been sold.
+>
+> §115 below is the reason for the two-product shape: cleanup is a job, not a
+> habit. The Backlog Pass is priced as the job, Pro as the habit, and the free
+> tier refills monthly at roughly a month of ordinary promotional mail — so an
+> inbox that is under control is never charged for, and only a backlog is.
 
-**Why annual-first:** this is a job people do a few times a year, not daily. Monthly billing invites cancellation the moment the inbox looks clean. Annual matches the value rhythm and roughly triples LTV. Offer monthly at $3.99 only as a save-offer in the cancel flow.
+**Why ₹299 for the pass:** Clean Email is $29.99/yr and Mailstrom is $59.99/yr — roughly ₹2,500 and ₹5,000. At ₹299 once, the switching decision stops being a decision. We do not compete on features at the entry tier: we compete on trust and on the sender-level UX, and we price so that trying us is cheaper than thinking about it.
+
+**Why the pass is sized at 50,000, not tightly metered:** the validated reference inbox was 6,010 messages, so the pass is eight times the largest mailbox actually measured. A pass that runs out mid-cleanup sends the buyer back to a payment queue a human clears by hand, at the exact moment their intent is highest. One payment, one confirmation, job done is worth more than the few rupees a tighter cap earns.
+
+**Why Pro is monthly and the pass is not:** this is a job people do a few times a year, not daily — so charging monthly for the *job* invites cancellation the moment the inbox looks clean, and deserves it. Pro bills monthly because scheduled re-scan is a service that runs monthly. The distinction is the whole pricing argument: charge once for the thing that finishes, and recurringly only for the thing that recurs.
 
 ---
 
 ## 2. The Day-One Money Play
+
+> **Superseded 3 September 2026 — kept as the record of why the founding tier
+> existed.** OAuth verification has cleared, so the 100-user cap that made
+> "only 100 exist" a true statement is gone, and the tier is retired with zero
+> seats sold. The reasoning below is still the right reasoning; the constraint
+> it was answering no longer applies. CASA Tier 2 now has to be funded from
+> Backlog Pass volume instead — at ₹299, that is roughly 150–500 sales rather
+> than 11–37, which is a materially harder first milestone and should be
+> planned for as such.
+
 
 **The Founding 100 lifetime deal is the entire revenue plan for month one**, and it is not a growth hack — it is exactly matched to the constraint. The 100-user cap is imposed by Google, so "only 100 exist" is a true statement, and it is the rare scarcity claim you can make without embarrassment.
 
@@ -69,6 +100,15 @@ With prompt caching on the frozen taxonomy prompt, repeat scans drop further.
 
 Add hosting (~$0.30/user/yr at scale) and Stripe (~$0.85 on a $19 annual charge) and you are still above **85% gross margin at the entry price**. That is what buys the room to price under Clean Email.
 
+> **Re-check against the ₹ pricing (3 September 2026).** The margin conclusion
+> survives the repricing — classification is per *sender* and cached against a
+> bucketed fingerprint, so it does not scale with the message counts the new
+> tiers meter, and UPI carries no processor fee at all where Stripe took ~3.5%.
+> What does *not* survive is the LTV arithmetic in §2 and §4: a ₹299 pass is
+> about a sixth of a $49 seat, and a free tier that refills 1,000 messages a
+> month means most users never buy a second time. Volume has to make up the
+> difference, and the numbers below have not been rebuilt for that.
+
 **Start on Sonnet 5, measure, then decide.** Sender classification from aggregate statistics is not a hard reasoning task, so Haiku 4.5 may well match it — but prove that on your own eval set before switching. A misclassification here costs a support ticket and a refund, which is worth far more than $0.10.
 
 **Free-tier COGS is ~$0**, because the free tier runs on OpenRouter's free models. The 50-request/day ceiling caps ~8 free scans per day globally, which is a real growth constraint to watch — the fix is to buy $10 of OpenRouter credit to lift the ceiling to 1,000/day, not to degrade the free tier.
@@ -87,7 +127,7 @@ Add hosting (~$0.30/user/yr at scale) and Stripe (~$0.85 on a $19 annual charge)
 
 **5 · Privacy-adjacent newsletters and creators.** The Unroll.me story gives this audience a reason to care. Affiliate at 30% first year.
 
-**Do not buy ads until CAC < ⅓ LTV is proven organically.** At a $19 entry price the CAC ceiling is roughly $6, which is below what most paid channels deliver for this category. Paid acquisition likely only works against the $49 founding tier or the $39 Pro plan.
+**Do not buy ads until CAC < ⅓ LTV is proven organically.** At ₹299 the CAC ceiling is about **₹100** — far below what any paid channel delivers, so paid acquisition is off the table against the Backlog Pass alone. It only becomes arguable once Pro retention is measured: a Pro subscriber who stays six months is ₹894, which lifts the ceiling to ~₹300. **Measure Pro retention before spending anything on ads.** Until then this is an organic-only product, which the repricing made more true, not less.
 
 ---
 
@@ -95,7 +135,7 @@ Add hosting (~$0.30/user/yr at scale) and Stripe (~$0.85 on a $19 annual charge)
 
 | Phase | Users | ARR | Milestone |
 |---|---|---|---|
-| Month 1 | 100 founding | **~$4,900 one-time** | Product validated, CASA funded, 100 testimonials |
+| Month 1 | 100 founding | ~~**~$4,900 one-time**~~ **n/a — tier retired, 0 sold** | Product validated; CASA **not** funded, see §2 |
 | Month 2–3 | Verification clears | — | Cap removed, funnel opens, SEO pages indexing |
 | Month 4–6 | 500–1,500 paid | $10K–30K | Comparison pages ranking, extension shipped |
 | Month 7–12 | 3,000–8,000 paid | $60K–160K | Paid acquisition working, Pro mix rising |
@@ -118,4 +158,4 @@ Ranked by probability × severity:
 
 ## 7. What I'd Do Differently If You Have Less Time Than Money
 
-If you can spend ~$2,000 up front, skip the founding-100 lifetime tier and go straight to $19/yr. The lifetime tier trades long-term LTV for immediate cash, and 100 lifetime Pro users is real revenue you never collect again. It is the right call when cash is the binding constraint — which, for a first product, it usually is.
+~~If you can spend ~$2,000 up front, skip the founding-100 lifetime tier.~~ **Moot as of 3 September 2026** — the founding tier is retired and no seats were sold, so no long-term LTV was traded away for immediate cash. The trade-off the paragraph warned about was avoided by not taking it.

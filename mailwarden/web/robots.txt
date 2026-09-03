@@ -20,4 +20,4 @@ Disallow: /api/
 Disallow: /auth/
 Disallow: /admin.html
 
-Sitemap: https://mailwarden.fly.dev/sitemap.xml
+Sitemap: https://mailwarden.xyz/sitemap.xml

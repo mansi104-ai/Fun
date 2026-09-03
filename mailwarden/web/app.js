@@ -842,7 +842,9 @@ async function renderSettings() {
     <h2>Account</h2>
     <div class="card">
       <p style="margin:0 0 6px"><strong>${esc(me.user.email)}</strong></p>
-      <p class="hint" style="margin:0">Plan: ${esc(me.user.plan)} · <a href="/pricing.html">See plans</a></p>
+      <p class="hint" style="margin:0 0 10px">${esc(planLabel(me.user.plan))}
+        · <a href="/pricing.html">See plans</a></p>
+      ${quotaPanel(me.quota)}
     </div>
 
     <h2>What Mailwarden will never touch</h2>
@@ -1070,8 +1072,56 @@ async function runUnsubscribe(button, senderKey) {
   } catch (err) {
     button.disabled = false;
     button.textContent = "Unsubscribe";
+    // A quota refusal is not a failed unsubscribe — nothing was sent, and the
+    // user needs the plans page rather than an error they cannot act on.
+    if (err.status === 402) return upgradePrompt(err.data.message);
     alert(`Could not unsubscribe: ${err.message}`);
   }
+}
+
+const PLAN_LABEL = {
+  free: "Free",
+  backlog: "Backlog Pass",
+  pro: "Pro",
+  founding: "Founding (lifetime)",
+  starter: "Starter",
+};
+const planLabel = (plan) => `Plan: ${PLAN_LABEL[plan] ?? plan}`;
+
+/**
+ * What is left, stated before it runs out.
+ *
+ * A wall the user did not see coming reads as a bait-and-switch even when the
+ * limit was published — so the number lives in the app, next to the work, and
+ * not only on the pricing page.
+ */
+function quotaPanel(q) {
+  if (!q || q.messagesLimit > 1e9) return "";
+
+  const pctLeft = q.messagesLimit > 0
+    ? Math.max(0, Math.min(100, Math.round((q.messagesLeft / q.messagesLimit) * 100)))
+    : 0;
+  const scope = q.refill === "pass"
+    ? `on your pass${q.expiresAt ? `, until ${new Date(q.expiresAt).toLocaleDateString()}` : ""}`
+    : "this month";
+
+  return `
+    <div style="margin-top:4px">
+      <div style="height:6px;border-radius:3px;background:var(--raised);overflow:hidden">
+        <div style="height:100%;width:${pctLeft}%;background:var(--text)"></div>
+      </div>
+      <p class="hint" style="margin:6px 0 0">
+        <strong>${q.messagesLeft.toLocaleString("en-IN")}</strong> of
+        ${q.messagesLimit.toLocaleString("en-IN")} messages left ${scope} ·
+        <strong>${q.unsubsLeft}</strong> of ${q.unsubsLimit} unsubscribes
+      </p>
+      ${q.messagesLeft === 0
+        ? `<p class="hint" style="margin:8px 0 0">
+             Out of room. <a href="/pricing.html">The Backlog Pass</a> clears up to
+             50,000 messages for ₹299.
+           </p>`
+        : ""}
+    </div>`;
 }
 
 function upgradePrompt(message) {

@@ -8,16 +8,21 @@ import { setPlan, type Plan } from "./entitlements.js";
 /**
  * BILLING.
  *
- * Two shapes of purchase, deliberately different:
+ * Two shapes of purchase, deliberately different, because the product is two
+ * different things to the same person:
  *
- *   Founding 100   $49 one-time, lifetime Pro. Capped at 100 seats because
- *                  Google's Testing mode caps the app at 100 users — the
- *                  scarcity is real, not manufactured, which is the rare case
- *                  where you can say "only 100 exist" without embarrassment.
- *   Starter / Pro  recurring annual subscriptions, for after verification.
+ *   Backlog Pass  ₹299 one-time. The JOB — clear a mailbox that has been
+ *                 filling up for years. Bought once, and sold as such.
+ *   Pro           ₹149/month. The HABIT — scheduled re-scans that stop it
+ *                 filling back up. docs/02 §115 names "cleanup is a job, not a
+ *                 habit" as the deepest structural risk in the business; this
+ *                 is the only recurring charge a customer would agree they are
+ *                 getting continuing value for.
  *
- * The founding tier exists to fund CASA Tier 2 ($540–$1,800) from customers
- * rather than out of pocket. That takes 11–37 sales, not 100.
+ * The Founding 100 tier was retired when OAuth verification cleared. It was
+ * sold on a stated condition — "Google caps unverified apps at 100 users while
+ * its review runs... when it lifts, the lifetime deal ends" — and that
+ * condition has now been met. Zero seats had been sold. See entitlements.ts.
  *
  * Nothing here trusts the client. A plan changes only when Stripe tells us it
  * changed, over a signature-verified webhook.
@@ -25,7 +30,7 @@ import { setPlan, type Plan } from "./entitlements.js";
 
 export const FOUNDING_SEATS = 100;
 
-export type PriceId = "founding" | "starter" | "pro";
+export type PriceId = "backlog" | "pro";
 
 export interface PriceInfo {
   id: PriceId;
@@ -41,10 +46,8 @@ export interface PriceInfo {
 
 function stripePriceFor(id: PriceId): string {
   switch (id) {
-    case "founding":
-      return config.stripe.priceFounding;
-    case "starter":
-      return config.stripe.priceStarter;
+    case "backlog":
+      return config.stripe.priceBacklog;
     case "pro":
       return config.stripe.pricePro;
   }
@@ -64,31 +67,21 @@ export function foundingSeatsSold(): number {
 export function priceCatalogue(): PriceInfo[] {
   return [
     {
-      id: "founding",
-      label: "Founding 100",
-      blurb: "Everything in Pro, forever. One payment. Only 100 exist.",
-      amount: 4900,
-      currency: "usd",
+      id: "backlog",
+      label: "Backlog Pass",
+      blurb: "Clear the whole backlog — up to 50,000 messages, 60 days, one payment.",
+      amount: 29900,
+      currency: "inr",
       mode: "payment",
-      plan: "founding",
-      configured: Boolean(config.stripe.priceFounding),
-    },
-    {
-      id: "starter",
-      label: "Starter",
-      blurb: "Unlimited cleanups and two-pass sender classification.",
-      amount: 1900,
-      currency: "usd",
-      mode: "subscription",
-      plan: "starter",
-      configured: Boolean(config.stripe.priceStarter),
+      plan: "backlog",
+      configured: Boolean(config.stripe.priceBacklog),
     },
     {
       id: "pro",
       label: "Pro",
-      blurb: "Scheduled re-scans, unsubscribe verification, up to 5 accounts.",
-      amount: 3900,
-      currency: "usd",
+      blurb: "Scheduled re-scans that keep it clean, 25,000 messages a month.",
+      amount: 14900,
+      currency: "inr",
       mode: "subscription",
       plan: "pro",
       configured: Boolean(config.stripe.pricePro),
@@ -127,10 +120,6 @@ export async function createCheckout(
       `Billing is not configured yet (missing ${price} price id).`,
     );
   }
-  if (price === "founding" && foundingSeatsSold() >= FOUNDING_SEATS) {
-    throw new SoldOutError("All 100 founding seats are gone.");
-  }
-
   const info = priceCatalogue().find((p) => p.id === price)!;
 
   const session = await stripe().checkout.sessions.create({

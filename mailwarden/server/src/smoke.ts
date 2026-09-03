@@ -26,8 +26,26 @@ import { analyticsSummary, recordWebEvent } from "./analytics.js";
 import { newId } from "./lib/crypto.js";
 import { promotionRefusal, sendersInState, stateOf } from "./overview.js";
 import { config } from "./config.js";
-import { FOUNDING_SEATS, foundingSeatsSold, grantManual, isAdmin, requestAccess } from "./lib/billing.js";
-import { canExecuteBatch, entitlementsFor, setPlan } from "./lib/entitlements.js";
+import {
+  FOUNDING_SEATS,
+  foundingSeatsSold,
+  grantManual,
+  isAdmin,
+  priceCatalogue,
+  requestAccess,
+} from "./lib/billing.js";
+import { priceInr } from "./lib/upi.js";
+import {
+  canCleanMessages,
+  canUnsubscribe,
+  entitlementsFor,
+  planDetails,
+  quotaFor,
+  recordMessagesCleaned,
+  recordUnsubscribe,
+  refundMessagesCleaned,
+  setPlan,
+} from "./lib/entitlements.js";
 import { DAY_MS, LIMITS } from "./safety/limits.js";
 import { assertExecutable, evaluate, GuardError, type CandidateMessage } from "./safety/policy.js";
 
@@ -426,41 +444,112 @@ db.prepare(`UPDATE senders SET user_protected = 0 WHERE account_id = ?`).run(acc
 
 // ── 11. Entitlements ─────────────────────────────────────────────────────
 
-section("11. Entitlement gate");
-
-// Metered in batches, not senders. A free user must be able to run a full
-// one-click recipe — paywalling before the first job completes is the
-// competitor failure documented in docs/00 §2a.
-check("Free plan allows the first cleanup", canExecuteBatch(userId).allowed);
+section("11. Quota gate");
 
 /**
- * The free limit is currently overridden to unlimited for pre-launch use, so
- * this asserts the GATE, not the number: exceeding whatever limit is configured
- * must block and must ask for an upgrade.
+ * The meter is MESSAGES, not cleanups.
  *
- * The override is surfaced as its own check rather than silently accommodated —
- * a disabled paywall that nobody is reminded about is a disabled paywall that
- * ships.
+ * A "batch" is not a unit anybody experiences: metering by it either gives the
+ * whole job away or walls a user off after one sender. These checks pin the
+ * behaviour that matters — a free user finishes a real, visible job before
+ * meeting any wall (docs/00 §2a), and the wall, when it comes, states the
+ * number rather than merely refusing.
  */
-const freeLimit = entitlementsFor(userId).freeBatches;
-const unlimited = freeLimit > 1_000;
-check(
-  unlimited
-    ? "NOTE: free tier is temporarily UNLIMITED — restore freeBatches to 1 once Stripe exists"
-    : `Free tier is metered at ${freeLimit} batch(es)`,
-  true,
-);
+setPlan(userId, "free");
+const freeQuota = quotaFor(userId);
+check("Free tier meters messages, not batches", freeQuota.messagesLimit === 1_000);
+check("A fresh free user has the whole allowance", freeQuota.messagesLeft === 1_000);
+check("A cleanup inside the allowance is permitted", canCleanMessages(userId, 900).allowed);
 
-db.prepare(`UPDATE users SET free_batch_used = ? WHERE id = ?`).run(
-  unlimited ? Number.MAX_SAFE_INTEGER : 1,
-  userId,
-);
-const exhausted = canExecuteBatch(userId);
-check("Exceeding the free limit blocks, and asks for an upgrade",
-  !exhausted.allowed && exhausted.upgradeRequired === true);
+/**
+ * All-or-nothing against the quota. Executing part of a reviewed batch would
+ * apply something other than what the user confirmed, and the confirm screen is
+ * the central safety promise — so an oversized batch is refused with its size,
+ * never silently trimmed.
+ */
+const oversize = canCleanMessages(userId, 1_200);
+check("A batch larger than the allowance is refused whole", !oversize.allowed);
+check("The refusal reports how much room is left", oversize.allowance === 1_000);
+check("The refusal names the real numbers, not a generic error",
+  Boolean(oversize.reason?.includes("1,200") && oversize.reason?.includes("1,000")));
 
-db.prepare(`UPDATE users SET plan = 'starter' WHERE id = ?`).run(userId);
-check("Paid plan is unrestricted", canExecuteBatch(userId).allowed);
+recordMessagesCleaned(userId, 950);
+check("Cleaned messages are counted", quotaFor(userId).messagesUsed === 950);
+check("A cleanup past the remainder is blocked", !canCleanMessages(userId, 100).allowed);
+check("Exhaustion asks for an upgrade", canCleanMessages(userId, 100).upgradeRequired === true);
+check("What still fits is still allowed", canCleanMessages(userId, 50).allowed);
+
+/**
+ * Undo returns the allowance. The 30-day reversal is advertised without
+ * qualification, so an undo that quietly cost the user their quota would make
+ * it something people hesitate over — which defeats the guarantee.
+ */
+refundMessagesCleaned(userId, 950);
+check("Undo returns the quota it consumed", quotaFor(userId).messagesUsed === 0);
+check("A refund cannot drive the counter negative",
+  (refundMessagesCleaned(userId, 5_000), quotaFor(userId).messagesUsed === 0));
+
+// The monthly refill is derived from the stored period, never from a cron —
+// a scheduled job that fails silently hands somebody a free month.
+recordMessagesCleaned(userId, 800);
+db.prepare(`UPDATE users SET quota_period = '1999-01' WHERE id = ?`).run(userId);
+const refilled = quotaFor(userId);
+check("A new calendar month refills the allowance", refilled.messagesLeft === 1_000);
+check("The refill is reported as a change", refilled.changed === true);
+
+// ── The Backlog Pass: a bucket, not a subscription ──────────────────────
+
+setPlan(userId, "backlog");
+const pass = quotaFor(userId);
+check("The Backlog Pass carries 50,000 messages", pass.messagesLimit === 50_000);
+check("The pass is sized past any inbox we have measured", pass.messagesLimit > 6_010 * 8);
+check("Buying a plan clears the allowance that pushed them to buy", pass.messagesUsed === 0);
+check("The pass expires rather than becoming a permanent cheap plan",
+  pass.expiresAt !== null && pass.expiresAt > Date.now());
+check("The pass runs for 60 days", planDetails("backlog").passDays === 60);
+
+// A lapsed pass falls back to free, and the free month it lands in must not
+// already be spent by the pass that just expired.
+recordMessagesCleaned(userId, 40_000);
+db.prepare(`UPDATE users SET plan_expires_at = ? WHERE id = ?`).run(Date.now() - 1_000, userId);
+const lapsed = quotaFor(userId);
+check("An expired pass falls back to free", lapsed.plan === "free");
+check("The fallback month starts unspent", lapsed.messagesUsed === 0);
+check("A lapsed pass is not billed for again", quotaFor(userId).expiresAt === null);
+
+// ── Unsubscribes: capped for safety, not for revenue ────────────────────
+
+/**
+ * Unsubscribing is outward-facing and cannot be recalled once a third party
+ * has received it, so the cap bounds the blast radius of a mistake. It is
+ * deliberately NOT a paywall lever — the marginal cost is nil, and metering it
+ * tightly would put friction on the feature people like most.
+ */
+setPlan(userId, "free");
+check("Free carries a small unsubscribe allowance", quotaFor(userId).unsubsLimit === 3);
+check("An unsubscribe inside the allowance is permitted", canUnsubscribe(userId).allowed);
+recordUnsubscribe(userId);
+recordUnsubscribe(userId);
+recordUnsubscribe(userId);
+check("The unsubscribe cap is enforced", !canUnsubscribe(userId).allowed);
+check("The unsubscribe wall points at Pro, not at a bigger one-off",
+  Boolean(canUnsubscribe(userId).reason?.includes("Pro")));
+check("Unsubscribes and messages are metered separately",
+  canCleanMessages(userId, 500).allowed);
+
+setPlan(userId, "pro");
+check("Pro raises the unsubscribe cap", quotaFor(userId).unsubsLimit === 25);
+check("Pro is metered, not falsely advertised as unlimited",
+  quotaFor(userId).messagesLimit === 25_000);
+check("Pro includes the scheduled re-scan that makes it recurring",
+  entitlementsFor(userId).scheduledRescan === true);
+
+// A lifetime grant predates the meter and must never be caught by it.
+setPlan(userId, "founding");
+check("A legacy founding grant is never metered", canCleanMessages(userId, 5_000_000).allowed);
+
+// Leave the fixture where the later sections expect it.
+setPlan(userId, "free");
 
 // ── 12. Regressions found against a real 6,000-message mailbox ───────────
 
@@ -839,10 +928,24 @@ check("Founding plan grants Pro-level entitlements", (() => {
   const e = entitlementsFor(billUser);
   return e.premiumClassification && e.scheduledRescan && e.maxAccounts === 5;
 })());
-check("A paying plan is never batch-limited", canExecuteBatch(billUser).allowed);
+check("A legacy lifetime grant is never metered", canCleanMessages(billUser, 1_000_000).allowed);
 
 check("Seats sold is counted, not cached", foundingSeatsSold() >= 1);
 check("The cap is the real Google Testing limit", FOUNDING_SEATS === 100);
+
+/**
+ * The Founding 100 tier is retired from sale, not deleted.
+ *
+ * It was sold on a stated condition printed on the pricing page — "Google caps
+ * unverified apps at 100 users while its review runs... when it lifts, the
+ * lifetime deal ends". Verification has cleared, so continuing to sell "only
+ * 100 exist" would be manufactured scarcity. Any seat already granted still
+ * works, unmetered, forever.
+ */
+check("Founding is no longer on sale",
+  priceCatalogue().every((price) => price.plan !== "founding"));
+check("A retired tier still prices, so an old order can be reconciled",
+  priceInr("founding") > 0);
 
 setPlan(billUser, "free");
 check("Downgrade takes effect immediately",
@@ -1201,7 +1304,7 @@ section("18. Analytics: the endpoint is public, so its limits are the security")
       referrer: "",
       ip: "203.0.113.9",
       userAgent: "smoke/1.0",
-      selfHost: "mailwarden.fly.dev",
+      selfHost: "mailwarden.xyz",
       ...over,
     });
 
@@ -1232,7 +1335,7 @@ section("18. Analytics: the endpoint is public, so its limits are the security")
       && !String(r.referrer_host).includes("secret")));
 
   // Our own pages linking to each other is navigation, not a referral.
-  ev({ referrer: "https://mailwarden.fly.dev/pricing.html", path: "/terms.html" });
+  ev({ referrer: "https://mailwarden.xyz/pricing.html", path: "/terms.html" });
   const selfRef = rowsSince().find((r) => r.path === "/terms.html");
   check("A same-origin referrer is dropped", selfRef?.referrer_host === null);
 

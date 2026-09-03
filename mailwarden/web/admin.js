@@ -48,8 +48,90 @@ async function boot() {
     throw err;
   }
   $("panel").hidden = false;
+  await loadUsers();
   await loadAnalytics(7);
   await loadRequests();
+}
+
+// ── Users ────────────────────────────────────────────────────────────
+
+const PLAN_LABEL = {
+  free: "Free",
+  backlog: "Backlog Pass",
+  pro: "Pro",
+  founding: "Founding (legacy)",
+  starter: "Starter (legacy)",
+};
+
+/**
+ * Quota as a bar plus the raw pair.
+ *
+ * The bar answers "is this person near the wall" at a glance; the numbers are
+ * what you actually act on when somebody writes in asking why a cleanup was
+ * refused. Neither is sufficient alone.
+ */
+function quotaCell(used, limit, period, current) {
+  // A lifetime grant is not metered — showing 0 / 9007199254740991 would be
+  // technically true and completely useless.
+  if (limit > 1e9) return `<span class="muted">unmetered</span>`;
+
+  // A row still stamped with an older period has not been touched this month.
+  // Its stored count belongs to that window, so showing it as spent would
+  // misreport somebody who is actually on a full allowance.
+  const stale = period && current && period !== current;
+  const shown = stale ? 0 : used;
+  const filled = limit > 0 ? Math.min(100, Math.round((shown / limit) * 100)) : 0;
+  const near = filled >= 90;
+
+  return `<div style="min-width:130px">
+    <div style="height:6px;border-radius:3px;background:var(--raised);overflow:hidden">
+      <div style="height:100%;width:${filled}%;background:${near ? "var(--err, #c0392b)" : "var(--text)"}"></div>
+    </div>
+    <span class="muted" style="font-size:.82rem">
+      ${shown.toLocaleString("en-IN")} / ${limit.toLocaleString("en-IN")}${stale ? " · refills on next use" : ""}
+    </span>
+  </div>`;
+}
+
+async function loadUsers() {
+  try {
+    const { users, period } = await api("/api/admin/users");
+    const body = $("users");
+
+    if (users.length === 0) {
+      body.innerHTML = `<tr><td colspan="7" class="muted">Nobody signed up yet.</td></tr>`;
+      $("userSummary").textContent = "No users yet.";
+      return;
+    }
+
+    const byPlan = {};
+    for (const u of users) byPlan[u.plan] = (byPlan[u.plan] ?? 0) + 1;
+    const paid = users.filter((u) => u.plan !== "free").length;
+    $("userSummary").innerHTML =
+      `<b>${users.length}</b> user${users.length === 1 ? "" : "s"} · <b>${paid}</b> paying · ` +
+      Object.entries(byPlan)
+        .map(([p, n]) => `${esc(PLAN_LABEL[p] ?? p)} ${n}`)
+        .join(" · ") +
+      ` · window ${esc(period)}`;
+
+    body.innerHTML = users.map((u) => {
+      const lapsing = u.expiresAt
+        ? ` <span class="muted">· ends ${when(u.expiresAt)}</span>`
+        : "";
+      return `<tr>
+        <td>${esc(u.email)}</td>
+        <td><span class="pill ${u.plan === "free" ? "wait" : "ok"}">${esc(PLAN_LABEL[u.plan] ?? u.plan)}</span>${lapsing}</td>
+        <td>${quotaCell(u.messagesUsed, u.messagesLimit, u.quotaPeriod, period)}</td>
+        <td>${quotaCell(u.unsubsUsed, u.unsubsLimit, u.quotaPeriod, period)}</td>
+        <td>${Number(u.cleanups ?? 0).toLocaleString("en-IN")}</td>
+        <td class="muted">${when(u.lastSyncAt)}</td>
+        <td class="muted">${when(u.createdAt)}</td>
+      </tr>`;
+    }).join("");
+  } catch (err) {
+    $("users").innerHTML = `<tr><td colspan="7" class="err">${esc(err.message)}</td></tr>`;
+    $("userSummary").textContent = "";
+  }
 }
 
 // ── Traffic ──────────────────────────────────────────────────────────

@@ -73,9 +73,12 @@ export const config = {
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY ?? "",
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+    priceBacklog: process.env.STRIPE_PRICE_ID_BACKLOG ?? "",
+    pricePro: process.env.STRIPE_PRICE_ID_PRO ?? "",
+    // Retired tiers, kept so a legacy price id in the environment is still
+    // readable rather than silently ignored.
     priceFounding: process.env.STRIPE_PRICE_ID_FOUNDING ?? "",
     priceStarter: process.env.STRIPE_PRICE_ID_STARTER ?? "",
-    pricePro: process.env.STRIPE_PRICE_ID_PRO ?? "",
   },
 
   /**

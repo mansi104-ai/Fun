@@ -3,22 +3,22 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Mailwarden — Founding 100</title>
+<title>Mailwarden — Plans</title>
 <meta name="description" content="One payment, lifetime access, only 100 seats. Mailwarden cleans your Gmail sender by sender and can never permanently delete anything." />
 <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
 <meta name="theme-color" content="#0a0a0a" />
 <!-- Social preview. og:image wants a raster; see web/brand/README.md. -->
 <meta property="og:type" content="website" />
-<meta property="og:title" content="Mailwarden — Founding 100" />
+<meta property="og:title" content="Mailwarden — Plans" />
 <meta property="og:description" content="One payment, lifetime access, only 100 seats. Sender-level Gmail cleanup that archives, never permanently deletes." />
-<meta property="og:url" content="https://mailwarden.fly.dev/pricing.html" />
-<meta property="og:image" content="https://mailwarden.fly.dev/brand/og.png" />
+<meta property="og:url" content="https://mailwarden.xyz/pricing.html" />
+<meta property="og:image" content="https://mailwarden.xyz/brand/og.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta property="og:image:alt" content="Mailwarden wordmark on black, over the line “Clean your Gmail. Without losing what matters.” and three tags: Safe, Review, Protected." />
 <meta name="twitter:card" content="summary_large_image" />
-<link rel="canonical" href="https://mailwarden.fly.dev/pricing.html" />
+<link rel="canonical" href="https://mailwarden.xyz/pricing.html" />
 <link rel="stylesheet" href="/brand.css" />
 <!-- Structured data. A ld+json block is a CSP "data block": the browser
      never executes it, so script-src does not apply and no inline-script
@@ -28,8 +28,8 @@
   "@context": "https://schema.org",
   "@type": "Product",
   "name": "Mailwarden",
-  "url": "https://mailwarden.fly.dev/pricing.html",
-  "image": "https://mailwarden.fly.dev/brand/og.png",
+  "url": "https://mailwarden.xyz/pricing.html",
+  "image": "https://mailwarden.xyz/brand/og.png",
   "description": "Sender-level Gmail cleanup that archives and never permanently deletes.",
   "brand": {
     "@type": "Brand",
@@ -38,27 +38,19 @@
   "offers": [
     {
       "@type": "Offer",
-      "name": "Founding 100",
-      "price": "49.00",
-      "priceCurrency": "USD",
-      "url": "https://mailwarden.fly.dev/pricing.html",
-      "availability": "https://schema.org/LimitedAvailability"
-    },
-    {
-      "@type": "Offer",
-      "name": "Starter",
-      "price": "19.00",
-      "priceCurrency": "USD",
-      "url": "https://mailwarden.fly.dev/pricing.html",
-      "availability": "https://schema.org/PreOrder"
+      "name": "Backlog Pass",
+      "price": "299.00",
+      "priceCurrency": "INR",
+      "url": "https://mailwarden.xyz/pricing.html",
+      "availability": "https://schema.org/InStock"
     },
     {
       "@type": "Offer",
       "name": "Pro",
-      "price": "39.00",
-      "priceCurrency": "USD",
-      "url": "https://mailwarden.fly.dev/pricing.html",
-      "availability": "https://schema.org/PreOrder"
+      "price": "149.00",
+      "priceCurrency": "INR",
+      "url": "https://mailwarden.xyz/pricing.html",
+      "availability": "https://schema.org/InStock"
     }
   ]
 }
@@ -102,40 +94,43 @@
 
   <h1>Plans</h1>
   <p class="lede">
-    The free tier is not a demo. It scans everything, classifies everything, explains
-    everything, and runs one complete cleanup for real — so you know what you are
-    paying for before you pay.
+    Free is not a demo. It scans everything, classifies everything, explains every
+    decision, and cleans a thousand messages a month for real — so you know exactly
+    what you are paying for before you pay anything.
   </p>
 
   <div class="card">
     <div class="price" style="font-size:1.7rem">Free <small>· ₹0</small></div>
-    <p class="muted" style="margin:6px 0 0">Understand your inbox.</p>
+    <p class="muted" style="margin:6px 0 0">Enough for an inbox that is under control.</p>
     <ul>
+      <li><b>1,000 messages a month</b>, cleaned for real</li>
       <li>Full scan and Safe / Review / Protected classification</li>
       <li>Every decision explained with real evidence</li>
-      <li>One complete cleanup, executed for real</li>
-      <li>Protection controls and undo</li>
+      <li>3 unsubscribes a month</li>
+      <li>Protection controls and 30-day undo</li>
     </ul>
+    <p class="muted" style="margin:14px 0 0">
+      A month of ordinary promotional mail is a few hundred messages. If that is
+      you, free is not a trial — it is the plan.
+    </p>
   </div>
 
   <div class="card hero">
-    <div class="seats" id="seats">Checking availability…</div>
-    <div class="price" id="heroPrice">₹799 <small>once — not per year</small></div>
+    <div class="price" id="backlogPrice">₹299 <small>once</small></div>
     <p class="muted" style="margin:6px 0 0">
-      <strong>Founding 100.</strong> Everything below, for life. Only 100 exist.
+      <strong>Backlog Pass.</strong> For the inbox that has been filling up for years.
     </p>
     <ul>
-      <li>Unlimited cleanups</li>
-      <li>Scheduled re-scans, so your inbox stays clean without you</li>
-      <li>Unsubscribe with verification that the sender honoured it</li>
-      <li>Up to 5 Gmail accounts</li>
-      <li>Every future feature, at no extra cost</li>
+      <li><b>50,000 messages</b> — more than eight times the largest inbox we have measured</li>
+      <li>60 days to work through it, at whatever pace suits you</li>
+      <li>50 unsubscribes</li>
+      <li>Two-pass classification on every ambiguous sender</li>
     </ul>
 
     <div id="upiStep1">
-      <button class="btn block" id="upiStart" data-evt="plan_select">Pay with UPI</button>
+      <button class="btn block" id="upiStart" data-evt="plan_select">Pay ₹299 with UPI</button>
       <p class="muted" style="margin:12px 0 0; text-align:center">
-        No card fee. You sign in with Google first, so we know which inbox the seat is for.
+        No card fee. You sign in with Google first, so we know which inbox it is for.
       </p>
     </div>
 
@@ -148,31 +143,38 @@
       <div id="upiRef" class="ref-code"></div>
       <a class="btn block" id="upiOpen" href="#">Open my UPI app</a>
       <p class="muted" style="margin:14px 0 0">
-        Scan from another phone, or tap here on this one. Your seat activates as soon
-        as we see the payment.
+        Scan from another phone, or tap here on this one. We confirm payments by
+        hand, usually within a few hours — you keep using the free tier meanwhile.
       </p>
     </div>
 
     <p class="muted hidden" id="upiUnavailable" style="margin:16px 0 0; text-align:center">
-      Payments open shortly — leave your address below for first refusal.
+      Payments open shortly — leave your address below and we will write.
     </p>
   </div>
 
   <div class="card">
-    <div class="price" style="font-size:1.7rem">Power <small>· later</small></div>
-    <p class="muted" style="margin:6px 0 0">For people with too much email.</p>
+    <div class="price" style="font-size:1.7rem" id="proPrice">₹149 <small>· per month</small></div>
+    <p class="muted" style="margin:6px 0 0">
+      <strong>Pro.</strong> For keeping it clean once it is.
+    </p>
     <ul>
-      <li>Multiple accounts, advanced automation, sender and domain rules</li>
+      <li>Scheduled re-scans, so it does not fill back up</li>
+      <li>25,000 messages a month</li>
+      <li>25 unsubscribes a month, with verification the sender honoured it</li>
+      <li>Up to 5 Gmail accounts</li>
     </ul>
-    <p class="muted" style="margin:0">
-      Not built yet. Founding seats include it when it ships.
+    <button class="btn ghost block" id="proStart" data-evt="plan_select">Pay ₹149 with UPI</button>
+    <p class="muted" style="margin:12px 0 0; text-align:center">
+      Cancel by telling us. There is no card on file to cancel.
     </p>
   </div>
 
   <div class="note">
-    <b>Why only 100?</b> Google caps unverified apps at 100 users while its review
-    runs. That review is what the founding seats pay for. The limit is imposed on us,
-    not invented for you — and when it lifts, the lifetime deal ends.
+    <b>Why two shapes?</b> Clearing years of backlog is a job you do once — so it
+    is priced once, and sized to actually finish. Keeping an inbox clean afterwards
+    is a habit, and that is the only thing worth charging monthly for. We would
+    rather say that plainly than sell you a subscription for a job with an end.
   </div>
 
   <div class="card" id="intlCard">
@@ -182,17 +184,17 @@
       Card checkout is <span id="intlState">not open yet</span> — leave your address
       below and we will write the moment it is.
     </p>
-    <button class="btn ghost hidden" id="buyFounding" data-evt="plan_select">Pay by card</button>
+    <button class="btn ghost hidden" id="buyBacklog" data-evt="plan_select">Pay by card</button>
   </div>
 
-  <h2>Not able to sign in yet?</h2>
+  <h2>Want to be told when card payment opens?</h2>
   <p class="muted" style="margin-top:0">
-    If all 100 seats are taken, leave your address and you get first refusal as
-    soon as one opens or verification clears.
+    Signing up is open to everyone — you do not need an invitation any more. This
+    list is only for people who cannot pay by UPI yet.
   </p>
   <form class="card" id="waitForm" style="margin-top:12px">
     <input type="email" id="waitEmail" placeholder="you@gmail.com" required autocomplete="email" />
-    <button class="btn block" type="submit" style="margin-top:12px">Request access</button>
+    <button class="btn block" type="submit" style="margin-top:12px">Tell me when it opens</button>
     <p class="muted" id="waitMsg" style="margin:12px 0 0"></p>
   </form>
 

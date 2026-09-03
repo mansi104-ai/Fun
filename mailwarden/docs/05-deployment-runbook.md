@@ -200,12 +200,15 @@ Only after verification is moving.
 
 ## 5. Launch day
 
-1. Remove nothing — the 100-user cap stays until verification clears.
+1. Set the OAuth publishing status to **In production**. Verification has
+   cleared, so the 100-user cap is gone and nothing in the code gates sign-up.
 2. Run Mailwarden on your own inbox; screenshot the receipt.
-3. Publish the landing page with the Founding 100 offer.
+3. Publish the landing page with the Backlog Pass offer (₹299, 50,000 messages).
 4. Post to r/gmail, r/productivity, Show HN, Indie Hackers. Lead with the
    number on the receipt and the undo guarantee.
-5. Add each buyer to the OAuth **Test users** list by hand.
+5. Watch the UPI queue in `/admin.html`. Payments are confirmed by hand, so a
+   buyer who pays while you are asleep waits — the free tier keeps working
+   meanwhile, which is what stops that being a lost sale.
 
 ## 6. Known gaps before public launch
 

@@ -7,9 +7,13 @@ import { listSenderMessages, readMessage } from "../gmail/reader.js";
 import { runSync, syncProgress } from "../gmail/sync.js";
 import { unsubscribeFromSender } from "../gmail/unsubscribe.js";
 import {
-  canExecuteBatch,
+  canCleanMessages,
+  canUnsubscribe,
   entitlementsFor,
-  recordFreeBatchUse,
+  quotaFor,
+  recordMessagesCleaned,
+  recordUnsubscribe,
+  refundMessagesCleaned,
 } from "../lib/entitlements.js";
 import { computeCategories, senderKeysForCategory } from "../categories.js";
 import { computeOverview, promotionRefusal, sendersInState } from "../overview.js";
@@ -59,6 +63,9 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
       user,
       account: account ?? null,
       entitlements: entitlementsFor(userId),
+      // Read through quotaFor so the monthly refill happens on the app's first
+      // call of a new month, rather than waiting for a cleanup to trigger it.
+      quota: quotaFor(userId),
       // Lets the UI show a demo banner and disable actions that would need a
       // real Gmail token.
       demo: demoEnabled() && user.email.endsWith("@mailwarden.local"),
@@ -273,8 +280,23 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
         .get(ctx.accountId, senderKey);
       if (!known) return reply.code(404).send({ error: "unknown_sender" });
 
+      // Checked BEFORE the request goes out. An unsubscribe cannot be recalled
+      // once a third party has received it, so the allowance has to be spent
+      // before the act, never reconciled after it.
+      const gate = canUnsubscribe(ctx.userId);
+      if (!gate.allowed) {
+        return reply.code(402).send({
+          error: "upgrade_required",
+          message: gate.reason,
+          quota: quotaFor(ctx.userId),
+        });
+      }
+
       try {
         const result = await unsubscribeFromSender(ctx.accountId, senderKey);
+        // A failed attempt is not charged: nothing left the building, and the
+        // user gets no value from a send we could not complete.
+        if (result.status !== "failed") recordUnsubscribe(ctx.userId);
         audit(ctx.userId, "sender.unsubscribe", {
           senderKey, method: result.method, status: result.status,
         });
@@ -374,7 +396,7 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const gate = canExecuteBatch(ctx.userId);
+    const gate = canCleanMessages(ctx.userId, 1);
     if (!gate.allowed) {
       return reply.code(402).send({ error: "upgrade_required", message: gate.reason });
     }
@@ -389,6 +411,21 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
 
     const payload = { ...plan, category: req.params.id };
     if (!plan.ok) return reply.code(409).send(payload);
+
+    // The batch is executable, so its real size is now known — check it against
+    // the allowance HERE rather than at execute, so the wall appears before the
+    // user confirms rather than after.
+    const room = canCleanMessages(ctx.userId, plan.messageCount);
+    if (!room.allowed) {
+      return reply.code(402).send({
+        error: "upgrade_required",
+        message: room.reason,
+        needed: plan.messageCount,
+        allowance: room.allowance,
+        quota: quotaFor(ctx.userId),
+      });
+    }
+
     return payload;
   });
 
@@ -430,7 +467,9 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(409).send({ error: "recipe_empty", message: "Nothing to clean here." });
       }
 
-      const gate = canExecuteBatch(ctx.userId);
+      // Cheap pre-check: is there any allowance at all? The batch's real size
+      // is checked against the quota below, once planning knows what it is.
+      const gate = canCleanMessages(ctx.userId, 1);
       if (!gate.allowed) {
         return reply.code(402).send({ error: "upgrade_required", message: gate.reason });
       }
@@ -447,6 +486,21 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
 
       const payload = { ...plan, recipe: { id: recipe.id, title: recipe.title, icon: recipe.icon } };
       if (!plan.ok) return reply.code(409).send(payload);
+
+      // The batch is executable, so its real size is now known — check it against
+      // the allowance HERE rather than at execute, so the wall appears before the
+      // user confirms rather than after.
+      const room = canCleanMessages(ctx.userId, plan.messageCount);
+      if (!room.allowed) {
+        return reply.code(402).send({
+          error: "upgrade_required",
+          message: room.reason,
+          needed: plan.messageCount,
+          allowance: room.allowance,
+          quota: quotaFor(ctx.userId),
+        });
+      }
+
       return payload;
     },
   );
@@ -467,7 +521,9 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: "no_senders" });
       }
 
-      const gate = canExecuteBatch(ctx.userId);
+      // Cheap pre-check: is there any allowance at all? The batch's real size
+      // is checked against the quota below, once planning knows what it is.
+      const gate = canCleanMessages(ctx.userId, 1);
       if (!gate.allowed) {
         return reply.code(402).send({ error: "upgrade_required", message: gate.reason });
       }
@@ -484,6 +540,21 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
       // A batch the policy blocked, or one needing a second confirmation, is
       // returned with batchId: null — there is deliberately nothing to execute.
       if (!plan.ok) return reply.code(409).send(plan);
+
+      // The batch is executable, so its real size is now known — check it against
+      // the allowance HERE rather than at execute, so the wall appears before the
+      // user confirms rather than after.
+      const room = canCleanMessages(ctx.userId, plan.messageCount);
+      if (!room.allowed) {
+        return reply.code(402).send({
+          error: "upgrade_required",
+          message: room.reason,
+          needed: plan.messageCount,
+          allowance: room.allowance,
+          quota: quotaFor(ctx.userId),
+        });
+      }
+
       return plan;
     },
   );
@@ -507,10 +578,23 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
         .get(batch.id) as { c: number }
     ).c;
 
-    // Re-check server-side: the plan call is not a durable authorisation.
-    const gate = canExecuteBatch(ctx.userId);
+    // Re-check server-side: the plan call is not a durable authorisation. The
+    // count comes from batch_items because `batches.message_count` is not
+    // written until the executor finishes.
+    const planned = (
+      db
+        .prepare(`SELECT COUNT(*) c FROM batch_items WHERE batch_id = ?`)
+        .get(batch.id) as { c: number }
+    ).c;
+    const gate = canCleanMessages(ctx.userId, planned);
     if (!gate.allowed) {
-      return reply.code(402).send({ error: "upgrade_required", message: gate.reason });
+      return reply.code(402).send({
+        error: "upgrade_required",
+        message: gate.reason,
+        needed: planned,
+        allowance: gate.allowance,
+        quota: quotaFor(ctx.userId),
+      });
     }
 
     try {
@@ -535,12 +619,16 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
       throw err;
     }
 
-    if (entitlementsFor(ctx.userId).plan === "free") recordFreeBatchUse(ctx.userId);
-
     const result = db.prepare(`SELECT * FROM batches WHERE id = ?`).get(batch.id) as Record<
       string,
       unknown
     >;
+
+    // Meter what was ACTUALLY applied, not what was planned. The guards can
+    // exclude messages between plan and execute, and charging for messages
+    // that were never touched is the kind of small dishonesty that costs more
+    // in trust than it earns in quota.
+    recordMessagesCleaned(ctx.userId, Number(result.message_count ?? 0));
     audit(ctx.userId, "batch.executed", { batchId: batch.id });
 
     return {
@@ -557,6 +645,12 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
     const ctx = requireAccount(req, reply);
     if (!ctx) return;
     const result = await undoBatch(ctx.accountId, req.params.id);
+
+    // Undo returns the quota it consumed. The 30-day reversal is advertised
+    // without qualification, so it must not quietly cost the user their
+    // allowance — an undo people hesitate over is not the guarantee we sold.
+    refundMessagesCleaned(ctx.userId, Number(result.restored ?? 0));
+
     audit(ctx.userId, "batch.undone", { batchId: req.params.id, ...result });
     return result;
   });

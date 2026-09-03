@@ -53,7 +53,7 @@ Then a live progress bar, then a receipt with a persistent **Undo everything** b
 
 1. **No destructive action without a preview screen listing exactly what moves.** No exceptions, no "don't show again."
 2. **Undo is a primary button, never a menu item.** It is the feature, not an escape hatch.
-3. **Never paywall mid-job.** The paywall appears on the *receipt* screen, after value has landed: "That was 1 of your 312 senders. Unlock the rest — $19/yr."
+3. **Never paywall mid-job.** The wall appears when a cleanup would exceed the allowance — *before* the confirm screen, never between confirming and executing — and it always states the two real numbers: what this job needs, and what is left. "This cleanup covers 6,645 messages and you have 1,000 left this month." A refusal that does not say how far short it is leaves the user with nothing to act on. The remaining allowance is also shown in Settings, so the wall is never the first time anybody hears about it.
 4. **Optimistic UI everywhere.** Gmail batch calls take seconds; the card should animate out instantly and reconcile after.
 5. **Copy uses "archive" and "trash." Never "delete."** It is legally accurate, compliance-safe, and less frightening.
 

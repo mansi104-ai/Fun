@@ -187,6 +187,18 @@ addColumn("users", "stripe_subscription", "TEXT");
 addColumn("users", "plan_expires_at", "INTEGER");
 addColumn("users", "founding_seat", "INTEGER");
 
+// Volume metering. The free tier is 1,000 cleaned messages a month; the
+// Backlog Pass is a 50,000-message bucket with a 60-day expiry. Both are
+// counted here, and `quota_period` is what makes the monthly refill derivable
+// from the row instead of dependent on a cron that can fail silently.
+//
+// `free_batch_used` above is the retired batch-count meter, left in place
+// rather than dropped: SQLite rewrites the whole table to drop a column, and
+// the old numbers are the only record of what the pre-metering tier gave away.
+addColumn("users", "messages_used", "INTEGER NOT NULL DEFAULT 0");
+addColumn("users", "unsubs_used", "INTEGER NOT NULL DEFAULT 0");
+addColumn("users", "quota_period", "TEXT");
+
 // Demand captured while the Google 100-user cap is binding. This is the list
 // you work through as seats free up, and the evidence that demand exists.
 db.exec(`

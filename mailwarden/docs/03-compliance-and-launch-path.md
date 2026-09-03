@@ -42,7 +42,7 @@ Day ~30     Self-scan against ASVS, fix findings, then book CASA Tier 2.
 Day 60-75   Verification + CASA clear. Remove the 100-user cap. Open funnel.
 ```
 
-The 100-user cap is a *feature* for launch messaging: **"Founding 100. Closed beta."** Scarcity is real, not manufactured — which means you can say it honestly.
+~~The 100-user cap is a *feature* for launch messaging: **"Founding 100. Closed beta."**~~ **Resolved 3 September 2026 — verification cleared and the cap is gone.** The scarcity was real while it lasted, which is why it was worth saying; it is not real now, so it is not said now. The Founding 100 tier was retired with zero seats sold rather than converted into invented scarcity. Launch messaging leads on the verification itself instead: an app Google has reviewed, holding a scope that cannot permanently delete anything.
 
 **Caveat to verify yourself:** Testing-mode refresh tokens have historically expired every 7 days for external-user testing apps. Confirm current behaviour in Google Cloud Console before promising uninterrupted service, and design the app to re-prompt gracefully. Budget for this being a real friction point with the first 100 users — tell them up front that beta requires a periodic reconnect.
 
@@ -97,7 +97,7 @@ three; two are now fixed in code and enforced by smoke §20.
 
 | Google's finding | Status |
 |---|---|
-| *"The website of your homepage URL `https://mailwarden.fly.dev` is not registered to you."* | **Open — needs a purchase.** A `*.fly.dev` subdomain is registered to Fly.io. Buy the domain, then `node scripts/set-domain.mjs https://mailwarden.ai` and the five manual steps in docs/09 §7. |
+| *"The website of your homepage URL `https://mailwarden.fly.dev` is not registered to you."* | **In progress.** `mailwarden.xyz` is registered (Namecheap, 2026-09-03) and the site's 25 self-references now point at it. Remaining: DNS records, the Fly certificate, and the five manual steps in docs/09 §7. |
 | *"Your homepage does not explain the purpose of your app."* | **Fixed.** The homepage now carries *What Mailwarden does*, *How it works*, a per-scope justification quoting the full scope strings, *What Mailwarden will not touch*, and the Limited Use citation. |
 | *"The app name configured for your OAuth consent screen does not match the app name on your homepage."* | **Fixed.** The page led with the tagline and carried the name only in the lowercase wordmark and in body copy. `Mailwarden` is now the first text in the `<h1>`, verbatim and identical to the consent screen and the `<title>`. |
 

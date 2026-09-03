@@ -116,13 +116,22 @@ export async function createUpiOrder(
   };
 }
 
-/** Rupee price per plan. Set via env so pricing can move without a deploy. */
+/**
+ * Rupee price per plan. Set via env so pricing can move without a deploy.
+ *
+ * Priced for India, where the old ₹1,499/month was a straight conversion of a
+ * US number and made no sense to the audience actually being sold to.
+ */
 export function priceInr(plan: Plan): number {
   switch (plan) {
+    case "backlog":
+      return Number(process.env.PRICE_INR_BACKLOG ?? "299");
+    case "pro":
+      return Number(process.env.PRICE_INR_PRO ?? "149");
+    // Retired tiers. A price is still returned so an order created before the
+    // change can still be reconciled by the operator.
     case "founding":
       return Number(process.env.PRICE_INR_FOUNDING ?? "799");
-    case "pro":
-      return Number(process.env.PRICE_INR_PRO ?? "1499");
     case "starter":
       return Number(process.env.PRICE_INR_STARTER ?? "799");
     default:

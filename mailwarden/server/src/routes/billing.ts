@@ -16,7 +16,7 @@ import {
   isAdmin,
   type PriceId,
 } from "../lib/billing.js";
-import type { Plan } from "../lib/entitlements.js";
+import { currentPeriod, planDetails, type Plan } from "../lib/entitlements.js";
 import { confirmOrder, createUpiOrder, pendingOrders, priceInr, upiConfigured } from "../lib/upi.js";
 import { notifyOperator } from "../lib/notify.js";
 import { currentUserId } from "./auth.js";
@@ -42,7 +42,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     if (!userId) return reply.code(401).send({ error: "not_authenticated" });
 
     const price = req.body?.price;
-    if (price !== "founding" && price !== "starter" && price !== "pro") {
+    if (price !== "backlog" && price !== "pro") {
       return reply.code(400).send({ error: "invalid_price" });
     }
 
@@ -113,7 +113,13 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get("/api/billing/upi", async () => ({
     available: upiConfigured(),
-    amountInr: priceInr("founding"),
+    // Both purchasable plans, priced server-side. The page never hard-codes an
+    // amount: a figure printed in HTML that disagrees with what the QR asks
+    // for is the one discrepancy a buyer is guaranteed to notice.
+    plans: {
+      backlog: priceInr("backlog"),
+      pro: priceInr("pro"),
+    },
   }));
 
   /**
@@ -128,8 +134,10 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     if (!userId) return reply.code(401).send({ error: "not_authenticated" });
     if (!upiConfigured()) return reply.code(503).send({ error: "upi_unavailable" });
 
-    const plan = (req.body?.plan ?? "founding") as Plan;
-    if (!["founding", "starter", "pro"].includes(plan)) {
+    const plan = (req.body?.plan ?? "backlog") as Plan;
+    // Retired tiers are not orderable. An old order already in the queue still
+    // prices and still confirms — this only stops a NEW one being created.
+    if (!["backlog", "pro"].includes(plan)) {
       return reply.code(400).send({ error: "invalid_plan" });
     }
 
@@ -273,6 +281,63 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
            ORDER BY created_at ASC LIMIT 500`,
         )
         .all(),
+    };
+  });
+
+  /**
+   * Who is actually using this.
+   *
+   * Reads the quota columns directly rather than calling quotaFor() per row:
+   * quotaFor performs the lazy monthly refill, and refilling five hundred
+   * users as a side effect of the operator opening a page would be a write
+   * storm triggered by a read. The stored period is returned alongside the
+   * count so a stale row is visible as stale rather than silently shown as
+   * spent.
+   */
+  app.get("/api/admin/users", async (req, reply) => {
+    const userId = currentUserId(req.cookies);
+    if (!userId) return reply.code(401).send({ error: "not_authenticated" });
+    const me = db.prepare(`SELECT email FROM users WHERE id = ?`).get(userId) as
+      | { email: string }
+      | undefined;
+    if (!isAdmin(me?.email)) return reply.code(403).send({ error: "forbidden" });
+
+    const rows = db
+      .prepare(
+        `SELECT u.id, u.email, u.plan, u.created_at, u.plan_expires_at,
+                u.messages_used, u.unsubs_used, u.quota_period,
+                a.last_sync_at, a.sync_state,
+                (SELECT COUNT(*) FROM batches b
+                   JOIN accounts a2 ON a2.id = b.account_id
+                  WHERE a2.user_id = u.id AND b.status = 'done') AS cleanups
+           FROM users u
+           LEFT JOIN accounts a ON a.user_id = u.id
+          ORDER BY u.created_at DESC
+          LIMIT 500`,
+      )
+      .all() as Record<string, unknown>[];
+
+    audit(userId, "admin.users_listed", { count: rows.length });
+
+    return {
+      period: currentPeriod(),
+      users: rows.map((r) => {
+        const ent = planDetails(String(r.plan) as Plan);
+        return {
+          email: r.email,
+          plan: r.plan,
+          createdAt: r.created_at,
+          expiresAt: r.plan_expires_at,
+          lastSyncAt: r.last_sync_at,
+          syncState: r.sync_state,
+          cleanups: r.cleanups,
+          quotaPeriod: r.quota_period,
+          messagesUsed: r.messages_used ?? 0,
+          messagesLimit: ent.monthlyMessages,
+          unsubsUsed: r.unsubs_used ?? 0,
+          unsubsLimit: ent.monthlyUnsubs,
+        };
+      }),
     };
   });
 }
