@@ -105,19 +105,18 @@
     and waits for your approval before anything moves.
   </p>
 
-  <form id="inviteForm" class="signup">
-    <input type="email" id="inviteEmail" required autocomplete="email"
-           placeholder="you@gmail.com" aria-label="Your Gmail address" />
-    <button class="btn" type="submit">Clean my Gmail →</button>
-  </form>
-  <p class="muted" id="inviteMsg" style="margin:12px 0 0" aria-live="polite"></p>
-  <p class="muted" style="margin:8px 0 0">
-    <a href="/auth/google" data-evt="cta_signin">Already invited? Sign in</a>
+  <p style="margin:22px 0 0">
+    <a class="btn" href="/auth/google" data-evt="cta_signin">Clean my Gmail →</a>
+  </p>
+  <p class="muted" style="margin:12px 0 0">
+    Free for 1,000 messages a month. No card. Sign in with Google — Mailwarden
+    asks only for the permission that cannot permanently delete mail.
   </p>
 
   <p class="muted" style="margin-top:40px; border-top:1px solid var(--border); padding-top:18px">
     Mailwarden cannot permanently delete anything. Every action is reversible for 30 days.
     <br>
+    <a href="/blog/">Writing</a> ·
     <a href="/pricing.html" data-evt="cta_pricing">Plans</a> ·
     <a href="/privacy.html">Privacy</a> ·
     <a href="/terms.html">Terms</a>
@@ -125,4 +124,3 @@
 </main>
 
 <script src="/analytics.js" defer></script>
-<script type="module" src="/index.js"></script>

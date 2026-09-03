@@ -15,6 +15,7 @@ Allow: /$
 Allow: /pricing.html
 Allow: /privacy.html
 Allow: /terms.html
+Allow: /blog/
 Disallow: /app
 Disallow: /api/
 Disallow: /auth/

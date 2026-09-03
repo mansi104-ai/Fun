@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Why I stopped trusting full-access Gmail cleanup tools — Mailwarden</title>
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+<meta name="theme-color" content="#0a0a0a" />
+<meta name="description" content="6,010 messages turned out to be 261 decisions. Why Mailwarden refuses the Gmail scope that permits permanent deletion, what that constraint cost, and what it bought." />
+<meta property="og:type" content="article" />
+<meta property="og:title" content="Why I stopped trusting full-access Gmail cleanup tools" />
+<meta property="og:description" content="6,010 messages turned out to be 261 decisions. Why Mailwarden refuses the Gmail scope that permits permanent deletion, and what that constraint cost." />
+<meta property="og:url" content="https://mailwarden.xyz/blog/why-i-stopped-trusting-full-access-gmail-cleanup-tools/" />
+<meta property="og:image" content="https://mailwarden.xyz/brand/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Mailwarden wordmark on black, over the line “Clean your Gmail. Without losing what matters.” and three tags: Safe, Review, Protected." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta property="article:published_time" content="2026-09-03" />
+<link rel="canonical" href="https://mailwarden.xyz/blog/why-i-stopped-trusting-full-access-gmail-cleanup-tools/" />
+<link rel="stylesheet" href="/brand.css" />
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Why I stopped trusting full-access Gmail cleanup tools (and built my own)",
+  "description": "6,010 messages turned out to be 261 decisions. Why Mailwarden refuses the Gmail scope that permits permanent deletion, what that constraint cost, and what it bought.",
+  "datePublished": "2026-09-03",
+  "dateModified": "2026-09-03",
+  "author": { "@type": "Person", "name": "Mansi Kalra" },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Mailwarden",
+    "url": "https://mailwarden.xyz/"
+  },
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://mailwarden.xyz/blog/why-i-stopped-trusting-full-access-gmail-cleanup-tools/"
+  },
+  "image": "https://mailwarden.xyz/brand/og.png",
+  "isPartOf": { "@type": "Blog", "name": "Mailwarden — Writing", "url": "https://mailwarden.xyz/blog/" }
+}
+</script>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Mailwarden", "item": "https://mailwarden.xyz/" },
+    { "@type": "ListItem", "position": 2, "name": "Writing", "item": "https://mailwarden.xyz/blog/" },
+    { "@type": "ListItem", "position": 3, "name": "Why I stopped trusting full-access Gmail cleanup tools" }
+  ]
+}
+</script>
+
+<style>
+  .brand { margin-bottom: 28px; }
+  article { max-width: 100%; }
+  article h2 { margin: 34px 0 12px; font-size: 1.32rem; line-height: 1.3; }
+  article p { margin: 0 0 16px; }
+  article figure { margin: 26px 0; }
+  article img { width: 100%; height: auto; border-radius: var(--radius-sm); display: block; }
+  figcaption { font-size: .85rem; color: var(--muted); margin-top: 8px; }
+  .crumbs { font-size: .84rem; margin-bottom: 10px; }
+  .byline { font-size: .86rem; margin: 0 0 26px; }
+  .pull {
+    border-left: 3px solid var(--text); background: var(--raised);
+    padding: 14px 16px; border-radius: var(--radius-sm); margin: 22px 0;
+  }
+  .pull p { margin: 0; }
+  .end { margin-top: 38px; border-top: 1px solid var(--border); padding-top: 20px; }
+</style>
+
+</head>
+<body>
+<main class="wrap">
+  <a class="brand" href="/" aria-label="Mailwarden home">
+    <span class="brand-tile" aria-hidden="true">
+      <svg viewBox="0 0 100 100" fill="none" aria-hidden="true">
+        <rect x="18" y="30" width="64" height="44" rx="8" stroke="currentColor" stroke-width="8"/>
+        <path d="M22 34l24 18a5 5 0 0 0 8 0l24-18" stroke="currentColor" stroke-width="8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    <span class="brand-word">mailwarden</span>
+  </a>
+
+  <nav class="muted crumbs" aria-label="Breadcrumb">
+    <a href="/">Mailwarden</a> · <a href="/blog/">Writing</a>
+  </nav>
+
+  <article>
+    <h1>Why I stopped trusting full-access Gmail cleanup tools (and built my own)</h1>
+    <p class="muted byline">
+      3 September 2026 · Article 1 of 5 on how Mailwarden is built
+    </p>
+
+    <p>
+      My Gmail had drifted to 6,010 messages. Every cleanup tool I tried asked me for one
+      of two things I wasn't willing to give: hours of reviewing emails one at a time, or
+      full access to my mailbox and blind trust that nothing would go wrong.
+    </p>
+    <p>
+      Neither is actually a solution — one just moves the tedium, the other just moves the
+      risk. So I built Mailwarden. Here's what running it on my own real inbox showed, and
+      the three decisions that made it possible.
+    </p>
+
+    <h2>The inbox isn't 6,010 things. It's 261.</h2>
+    <p>
+      The first insight is almost embarrassingly simple once you see it: nobody's inbox is
+      actually thousands of independent problems. On my own account, 6,010 messages broke
+      down to <strong>261 distinct senders</strong>. Newsletters I subscribed to once.
+      Promotional blasts from things I signed up for years ago. Notification digests I've
+      never opened.
+    </p>
+    <p>
+      The number of real <em>decisions</em> — does this sender matter or not — was never
+      6,010. It was 261. Message count was just noise multiplying a small number of real
+      choices.
+    </p>
+
+    <figure>
+      <img src="/blog/img/sender-vs-message.webp" width="1400" height="788"
+           alt="Two columns compared: message-level cleanup showing thousands of individual
+                emails to review, against sender-level cleanup showing roughly two hundred
+                grouped decisions." />
+      <figcaption>Message-level tools ask you to make thousands of decisions. Sender-level asks for a couple of hundred.</figcaption>
+    </figure>
+
+    <p>
+      So Mailwarden classifies at the sender level, not the message level: aggregate
+      everything from one sender, show the evidence, make one decision that applies to
+      everything from that source. That's a <strong>23× reduction</strong> in decisions for
+      a person — and because classification runs once per sender instead of once per
+      message, it's also roughly a <strong>100× reduction in inference cost</strong>.
+    </p>
+    <p>
+      Those aren't two separate wins from two separate design choices. They're the same
+      fact from two directions: fewer decisions for a human is fewer classifications for a
+      model, because they're counting the same 261 things. That ratio is also what makes a
+      genuinely useful free tier survive on a tight model budget at all.
+    </p>
+
+    <h2>It is structurally incapable of permanently deleting anything</h2>
+    <p>
+      Here's the decision I spent more time on than any other, and the one I think matters
+      more than the speed.
+    </p>
+    <p>
+      I didn't want to promise "we'll be careful with your data" and ask you to believe me.
+      I wanted a constraint that didn't depend on my code being bug-free, or my intentions
+      staying good, or the app still existing next year.
+    </p>
+    <p>
+      Gmail's API offers a scope called <code>mail.google.com</code> that grants full
+      access, including permanent deletion. Mailwarden never requests it. It requests
+      <code>gmail.modify</code> instead — which can archive, label, and trash, but
+      <strong>cannot</strong> permanently delete. Google will not grant that capability
+      under this scope, full stop.
+    </p>
+
+    <div class="pull">
+      <p>
+        That's not a setting I could quietly change later. It is the permission boundary
+        the app runs inside. Worst case — a misclassification, a bug I haven't found yet,
+        anything at all — the affected mail lands in your own Gmail trash, where Gmail
+        holds it for 30 days. You could restore it yourself with Mailwarden switched off
+        entirely.
+      </p>
+    </div>
+
+    <p>
+      I built this constraint before I built the product, on purpose. If it doesn't hold,
+      nothing else — the speed, the interface, the classification accuracy — matters at all.
+    </p>
+
+    <figure>
+      <img src="/blog/img/three-decisions.webp" width="1400" height="788" loading="lazy"
+           alt="Three pillars: sender-level classification, a scope that cannot delete, and
+                consent as the interaction model." />
+      <figcaption>The three decisions, each made before the product was built.</figcaption>
+    </figure>
+
+    <p>
+      It also isn't only a trust argument; it's an economic one. Google's app-verification
+      process prices access tiers by what an app can do. The tier that allows full mailbox
+      access runs roughly <strong>$4,500/year</strong> to maintain. The tier that matches
+      <code>gmail.modify</code> runs <strong>$540–$1,800/year</strong>. One decision bought
+      three things at once: a real undo guarantee, a claim no full-access competitor can
+      honestly make, and a compliance bill I can actually afford as a solo builder.
+    </p>
+
+    <h2>Consent isn't a checkbox — it's the interaction model</h2>
+    <p>
+      Every batch follows the same loop: preview, explicit approval, execute, receipt.
+      Nothing moves without a click on a screen showing exactly what is about to move — and
+      the count on that screen isn't a rough estimate. It's produced by dry-running the
+      <em>real</em> safety policy before you ever see it, so the number on the tile is
+      exactly what will happen when you click.
+    </p>
+    <p>
+      A tile that promises 2,341 and delivers 1,800 destroys trust faster than a tile that
+      never existed. Every message's prior state is recorded before anything changes, which
+      is what makes undo exact rather than approximate — reversing a batch doesn't guess at
+      what it looked like before, it replays what was actually recorded.
+    </p>
+
+    <figure>
+      <img src="/blog/img/overview.webp" width="1400" height="875" loading="lazy"
+           alt="Mailwarden's overview screen showing the three-way split between Safe,
+                Review and Protected, with message counts for each." />
+      <figcaption>The three-way split is the whole trust model in one screen: what's safe, what needs a look, and what will not be touched.</figcaption>
+    </figure>
+
+    <h2>What it looked like on my own inbox</h2>
+    <p>
+      I connected my real account — the one I'd been avoiding cleaning up for years.
+      Mailwarden synced 5,998 messages in 189 seconds and aggregated them down to 261
+      senders. The classifier resolved 45 ambiguous senders in a single model request.
+    </p>
+    <p>
+      Of 5,882 classified messages, <strong>401 were locked as untouchable — 6.8%</strong>.
+      Every sender I'd have been upset to lose was in that set: Google Accounts, my bank, a
+      payments processor, and all eleven human correspondents I'd ever replied to. The
+      other 5,481 were promotional blasts, notification digests and newsletters.
+    </p>
+    <p>
+      Getting there took finding four bugs that no synthetic test inbox would have caught.
+      The worst one: a single stray reply used to lock an entire bulk sender as personal,
+      which made 1,964 messages — a third of the mailbox — permanently untouchable. Reply
+      detection is now a ratio rather than a boolean. Messages wrongly locked fell from
+      about 56% to 6%.
+    </p>
+
+    <h2>Where things actually stand</h2>
+    <p>
+      I'd rather you know the real state than find out mid-signup. Google's OAuth
+      verification review is complete, so sign-up is open to anyone and the old 100-user
+      cap is gone. Mailwarden is still run by one person, so payments are confirmed by
+      hand and there's no uptime guarantee worth calling one.
+    </p>
+    <p>
+      Pricing is deliberately shaped around the fact that inbox cleanup is a job, not a
+      habit. The free tier clears 1,000 messages a month — roughly a month of ordinary
+      promotional mail, so an inbox that's under control never pays. The Backlog Pass is
+      ₹299 once for up to 50,000 messages, because clearing years of accumulation is
+      something you do once and should be charged for once. Pro is ₹149 a month, and the
+      only thing it sells is the scheduled re-scan that genuinely recurs.
+    </p>
+
+    <h2>Why I'm writing this instead of just linking the app</h2>
+    <p>
+      The pitch isn't really "clean your inbox fast," even though that's true. It's "you
+      shouldn't have to trust a tool with data it doesn't need, or power it doesn't need to
+      have." Sender-level aggregation is what makes the speed possible.
+      <code>gmail.modify</code> is what makes the trust possible. I think the second one is
+      the actual product, and the first is just what makes it usable day to day.
+    </p>
+    <p>
+      This is article one of a series opening the whole thing up — the sync and
+      classification pipeline that turns thousands of messages into a couple of hundred
+      decisions, the single chokepoint every mailbox mutation has to pass through, and
+      exactly what does and doesn't reach a third-party model when the classifier needs
+      help.
+    </p>
+
+    <div class="end">
+      <p>
+        <a class="btn" href="/">Try Mailwarden</a>
+      </p>
+      <p class="muted">
+        <strong>Next:</strong> how 6,010 emails become 261 decisions — the sync strategy,
+        the four-tier classifier, and the bug that once locked a third of a real mailbox
+        over one stray reply.
+      </p>
+      <p class="muted">
+        Building this in public — <a href="https://twitter.com/seeker_1010" rel="me noopener">@seeker_1010</a>.
+      </p>
+    </div>
+  </article>
+
+  <p class="muted" style="margin-top:30px">
+    <a href="/blog/">All writing</a> · <a href="/pricing.html">Plans</a>
+  </p>
+  <p class="muted" style="margin-top:34px; border-top:1px solid var(--border); padding-top:18px">
+    <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a> ·
+    Mailwarden cannot permanently delete anything. Everything is reversible for 30 days.
+  </p>
+</main>
+
+<script src="/analytics.js" defer></script>
+</body>
+</html>

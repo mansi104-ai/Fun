@@ -2,18 +2,26 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://mailwarden.xyz/</loc>
-    <lastmod>2026-08-21</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://mailwarden.xyz/pricing.html</loc>
-    <lastmod>2026-08-21</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://mailwarden.xyz/privacy.html</loc>
-    <lastmod>2026-08-21</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://mailwarden.xyz/terms.html</loc>
-    <lastmod>2026-08-21</lastmod>
+    <lastmod>2026-09-03</lastmod>
+  </url>
+  <url>
+    <loc>https://mailwarden.xyz/blog/</loc>
+    <lastmod>2026-09-03</lastmod>
+  </url>
+  <url>
+    <loc>https://mailwarden.xyz/blog/why-i-stopped-trusting-full-access-gmail-cleanup-tools/</loc>
+    <lastmod>2026-09-03</lastmod>
   </url>
 </urlset>

@@ -1404,8 +1404,28 @@ section("19. SEO: canonical, sitemap and robots stay in agreement");
  * disagree for weeks before anyone notices.
  */
 {
-  const PUBLIC_PAGES = ["index.html", "pricing.html", "privacy.html", "terms.html"];
+  const PUBLIC_PAGES = [
+    "index.html", "pricing.html", "privacy.html", "terms.html",
+    // Clean URLs: /blog/ and /blog/<slug>/ are directories served by their
+    // index.html. Article URLs carry no extension on purpose — a slug that
+    // never has to change is worth more than a file name, because a URL that
+    // moves after it has been linked to loses everything it earned.
+    "blog/index.html",
+    "blog/why-i-stopped-trusting-full-access-gmail-cleanup-tools/index.html",
+  ];
   const PRIVATE_PAGES = ["app.html", "admin.html"];
+
+  /**
+   * A route as the crawler sees it, mapped to the file that answers it.
+   *
+   * Defined once because the sitemap check and the canonical check must agree
+   * on this mapping — if they disagree, one of them silently stops testing
+   * anything, which is worse than either being absent.
+   */
+  const fileForRoute = (route: string): string =>
+    route === "/" ? "index.html"
+      : route.endsWith("/") ? `${route.slice(1)}index.html`
+      : route.slice(1);
 
   const robotsPath = path.join(webDir, "robots.txt");
   const sitemapPath = path.join(webDir, "sitemap.xml");
@@ -1427,8 +1447,8 @@ section("19. SEO: canonical, sitemap and robots stay in agreement");
   // straight to the crawler.
   for (const loc of locs) {
     const route = new URL(loc).pathname;
-    const file = route === "/" ? "index.html" : route.replace(/^\//, "");
-    check(`Sitemap ${route} resolves to a real file`, existsSync(path.join(webDir, file)));
+    check(`Sitemap ${route} resolves to a real file`,
+      existsSync(path.join(webDir, fileForRoute(route))));
   }
 
   // Nothing behind sign-in belongs in a sitemap.
@@ -1454,8 +1474,8 @@ section("19. SEO: canonical, sitemap and robots stay in agreement");
     check(`web/${file} has a canonical URL`, Boolean(canonical));
     if (canonical) {
       const route = new URL(canonical[1]!).pathname;
-      const target = route === "/" ? "index.html" : route.replace(/^\//, "");
-      check(`web/${file} canonical points at itself`, target === file, canonical[1]!);
+      check(`web/${file} canonical points at itself`,
+        fileForRoute(route) === file, canonical[1]!);
       check(`web/${file} canonical is in the sitemap`, locs.includes(canonical[1]!));
       check(`web/${file} canonical shares the sitemap's origin`,
         new URL(canonical[1]!).origin === origin);
