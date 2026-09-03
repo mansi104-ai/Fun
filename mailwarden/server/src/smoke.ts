@@ -35,6 +35,7 @@ import {
   requestAccess,
 } from "./lib/billing.js";
 import { priceInr } from "./lib/upi.js";
+import { canonicalRedirect } from "./lib/canonical.js";
 import {
   canCleanMessages,
   canUnsubscribe,
@@ -1497,6 +1498,61 @@ section("19. SEO: canonical, sitemap and robots stay in agreement");
     const html = readFileSync(path.join(webDir, file), "utf8");
     check(`web/${file} is noindex`, /<meta\s+name="robots"\s+content="[^"]*noindex/.test(html));
   }
+}
+
+// ── 21. One host serves the site ─────────────────────────────────────────
+
+section("21. Canonical host redirect");
+
+/**
+ * This rule is deploy-critical in both directions, which is why it is tested
+ * rather than eyeballed.
+ *
+ * Exempt too little and Fly's health probe — which reaches the machine
+ * directly, without the public hostname — receives a 301. Fly reads that as an
+ * unhealthy machine and rolls the release back, and the symptom is a deploy
+ * that fails for no visible reason.
+ *
+ * Exempt too much and the site answers on several hosts at once, which splits
+ * its own ranking across them and signs users out when they drift between.
+ */
+{
+  const APP = "https://mailwarden.xyz";
+  const go = (hostname: string, url = "/") =>
+    canonicalRedirect({ hostname, url }, APP, true);
+
+  check("The canonical host is served, not redirected", go("mailwarden.xyz", "/pricing.html") === null);
+
+  check("fly.dev is redirected to the canonical origin",
+    go("mailwarden.fly.dev", "/pricing.html") === "https://mailwarden.xyz/pricing.html");
+  check("www is redirected too", go("www.mailwarden.xyz", "/") === "https://mailwarden.xyz/");
+
+  // A redirect that drops the path sends every deep link to the homepage,
+  // which loses the visitor and the link equity in one step.
+  check("The path survives the redirect",
+    go("mailwarden.fly.dev", "/blog/why-i-stopped-trusting-full-access-gmail-cleanup-tools/")
+      === "https://mailwarden.xyz/blog/why-i-stopped-trusting-full-access-gmail-cleanup-tools/");
+  // Losing the query string means losing the attribution on every campaign
+  // link that happens to name the wrong host.
+  check("The query string survives the redirect",
+    go("mailwarden.fly.dev", "/pricing.html?utm_source=hn&utm_medium=x")
+      === "https://mailwarden.xyz/pricing.html?utm_source=hn&utm_medium=x");
+
+  // THE ONE THAT FAILS DEPLOYS.
+  check("/healthz answers on any host", go("mailwarden.fly.dev", "/healthz") === null);
+  check("/healthz answers on a bare machine address", go("172.19.0.42", "/healthz") === null);
+  check("/healthz is exempt even with a query", go("fly.dev", "/healthz?probe=1") === null);
+  // Exemption is by exact path: a page merely starting with the probe's name
+  // is a normal page and must still be consolidated onto one host.
+  check("The exemption does not leak to look-alike paths",
+    go("mailwarden.fly.dev", "/healthz-status") !== null);
+
+  check("Development never redirects",
+    canonicalRedirect({ hostname: "127.0.0.1", url: "/" }, "http://localhost:8080", false) === null);
+  // Serving on the wrong host costs ranking. Redirecting into a malformed URL
+  // is an outage, so a broken APP_URL must fail open.
+  check("A malformed APP_URL fails open rather than taking the site down",
+    canonicalRedirect({ hostname: "anything", url: "/" }, "not a url", true) === null);
 }
 
 // ── 20. OAuth verification: what a Google reviewer must find on the homepage ─

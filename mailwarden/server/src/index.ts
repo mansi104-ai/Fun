@@ -4,6 +4,7 @@ import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import { config } from "./config.js";
+import { canonicalRedirect } from "./lib/canonical.js";
 import { authRoutes } from "./routes/auth.js";
 import { analyticsRoutes } from "./routes/analytics.js";
 import { apiRoutes } from "./routes/api.js";
@@ -61,18 +62,23 @@ await app.register(cookie, { secret: config.sessionSecret });
 await app.register(fastifyStatic, { root: webRoot, prefix: "/" });
 
 /**
- * `www` and the apex must not both serve the site. Every canonical tag names
- * the apex, so a page answering on both is duplicate content advertising the
- * other host — and a session cookie set on one host is not sent to the other,
- * so a user who drifts between them is silently signed out.
+ * ONE HOST SERVES THE SITE. Everything else is a permanent redirect to it.
  *
- * `hostname` excludes the port in Fastify 5, and `trustProxy` is on in
- * production, so this reads the forwarded host rather than the machine's.
+ * The app answers on at least three names — `mailwarden.xyz`,
+ * `www.mailwarden.xyz` and `mailwarden.fly.dev` — and Fly will happily add
+ * more. Serving the same pages on all of them costs twice: every canonical tag
+ * names one host, so a page answering on a second is duplicate content
+ * advertising the first; and a session cookie set on one host is not sent to
+ * another, so a user who drifts between them is silently signed out mid-task.
+ *
+ * The rule itself lives in lib/canonical.ts, where it can be tested without a
+ * socket — see smoke §21. `hostname` excludes the port in Fastify 5, and
+ * `trustProxy` is on in production, so this reads the forwarded host rather
+ * than the machine's.
  */
 app.addHook("onRequest", async (req, reply) => {
-  if (!req.hostname.startsWith("www.")) return;
-  const apex = req.hostname.slice(4);
-  return reply.redirect(new URL(req.url, `https://${apex}`).toString(), 301);
+  const target = canonicalRedirect(req, config.appUrl, config.isProd);
+  if (target) return reply.redirect(target, 301);
 });
 
 app.addHook("onSend", async (_req, reply) => {
