@@ -1,6 +1,10 @@
-streamlit==1.61.1
-openpyxl==3.1.5
-pillow==11.0.0
-numpy==2.2.0
-pandas==2.2.3
-pytesseract==0.3.13
+# Lower bounds only. Exact pins made Community Cloud compile numpy, pandas and
+# Pillow from source whenever its Python was newer than those versions had
+# wheels for, which turns a one-minute build into a very long one. Unpinned,
+# the installer picks releases that ship wheels for whatever Python it runs.
+streamlit>=1.61
+openpyxl>=3.1
+pytesseract>=0.3.10
+pillow
+numpy
+pandas
