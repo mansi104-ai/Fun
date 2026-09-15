@@ -1,393 +1,339 @@
 """
-app.py
-Streamlit UI for the SCL Excel Extractor.
+SCL screenshots -> the C:M columns of a workbook's first worksheet.
 
-Run locally with:
-    streamlit run app.py
+Everything is read on the machine running the app: the table is found with
+classical computer vision and read by Tesseract, with no model, no API key and
+nothing sent anywhere.
 
-Three ways to use it:
-  - Saved library: the reference workbook and the screenshot folders live in a
-    persistent data directory (a Fly volume when deployed, ./scl_data locally).
-    Because the same workbook file is reopened every time, its
-    Processing_History sheet accumulates across sessions and already-processed
-    screenshots stay skipped. This is the mode the hosted deployment is for.
-  - One-off upload: upload a workbook and some screenshots, process, download.
-    Nothing is kept afterwards.
-  - Local folder (hidden when hosted): point at a folder and an Excel file by
-    path on this machine, same as the command-line tool.
+It runs in one of two places, and step four -- saving the workbook -- differs
+between them because of what each can reach:
+
+  * On your laptop (Run SCL Tool.bat): the workbook is chosen by its path and
+    saved back to that path in place. Nothing to download.
+  * Hosted on Streamlit Community Cloud: the app runs on Streamlit's server,
+    which cannot see your disk. The workbook is uploaded instead, written to
+    in memory, and handed back with a download button.
 """
 
 import io
 import os
-import hmac
+import tempfile
+from pathlib import Path
 
-import openpyxl
 import pandas as pd
 import streamlit as st
 
-import scl_core as core
-import store
+import local_config
+from excel_write import ROWS_PER_BLOCK, append_blocks, describe_target
+from table_read import COLUMNS, SUBTYPES, TableNotFound, find_tesseract, read_table
 
-st.set_page_config(page_title="SCL Excel Extractor", page_icon="\U0001F4CA", layout="wide")
+IMAGE_TYPES = ["png", "jpg", "jpeg", "bmp", "tif", "tiff"]
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+# Community Cloud checks every app out under /mount/src. SCL_HOSTED=1 forces
+# hosted mode anywhere else, e.g. to try it locally.
+HOSTED = (
+    os.environ.get("SCL_HOSTED") == "1"
+    or Path(__file__).resolve().as_posix().startswith("/mount/src/")
+)
 
-# Set by the container image (see Dockerfile).
-HOSTED = os.environ.get("SCL_HOSTED") == "1"
+st.set_page_config(page_title="SCL Table to Excel", layout="wide")
+st.title("SCL Table \u2192 Excel")
+st.caption(
+    "Drop in the SCL screenshots and your workbook. Each table is cut away "
+    "from its graph, read cell by cell, and written into columns C:M of the "
+    "first worksheet \u2014 six rows per screenshot, one blank row between."
+)
 
-
-# ---------------------------------------------------------------------------
-# Access gate
-# ---------------------------------------------------------------------------
-
-def require_password():
-    """
-    Optional single shared password, read from the SCL_PASSWORD secret.
-
-    Unset is the default and means no gate at all: the page is just the tool.
-    Turning it on later needs no code change, only
-
-        fly secrets set SCL_PASSWORD=... --app bex-scl-tool
-    """
-    expected = os.environ.get("SCL_PASSWORD", "")
-
-    if not expected:
-        return
-
-    if st.session_state.get("authed"):
-        return
-
-    st.title("SCL Excel Extractor")
-    pw = st.text_input("Password", type="password")
-    if st.button("Sign in", type="primary"):
-        # Constant-time compare: a plain == leaks the password's prefix through
-        # response timing to anyone willing to measure it.
-        if hmac.compare_digest(pw, expected):
-            st.session_state["authed"] = True
-            st.rerun()
-        else:
-            st.error("Incorrect password.")
+if not find_tesseract():
+    st.error(
+        "**Tesseract is not installed** (or not where this tool looked). It is "
+        "the free OCR engine that reads each cell. Install it from "
+        "https://github.com/UB-Mannheim/tesseract/wiki with the default "
+        "options, then refresh this page."
+    )
     st.stop()
 
 
-require_password()
+def browse_for_excel():
+    """
+    Open the machine's own file picker and return the chosen path.
+
+    A browser upload hands over the bytes but never the path, and the path is
+    exactly what is needed to save the workbook back where it came from. The
+    dialog opens on the machine running the app, so it is only offered locally.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        return None
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    chosen = filedialog.askopenfilename(
+        title="Select the reference workbook",
+        filetypes=[("Excel workbook", "*.xlsx *.xlsm"), ("All files", "*.*")],
+    )
+    root.destroy()
+    return chosen or None
+
+
+def hosted_workbook(upload):
+    """
+    The uploaded workbook as a file on the server, kept for this session.
+
+    openpyxl works on a path, so the upload is written into a per-session temp
+    folder. It is replaced only when a different file is uploaded: after a
+    write, the uploader still holds the original, and reloading that would
+    silently throw the new blocks away.
+    """
+    if "workdir" not in st.session_state:
+        st.session_state.workdir = tempfile.mkdtemp(prefix="scl_")
+    path = Path(st.session_state.workdir) / Path(upload.name).name
+    if st.session_state.get("source_id") != upload.file_id:
+        path.write_bytes(upload.getvalue())
+        st.session_state.source_id = upload.file_id
+        st.session_state.written_here = []
+    return path
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# 1. The two inputs, side by side: screenshots on the left, workbook on the right
 # ---------------------------------------------------------------------------
+images_column, excel_column = st.columns(2)
 
-def get_history_df(wb):
-    if core.HISTORY_SHEET_NAME not in wb.sheetnames:
-        return pd.DataFrame(columns=core.HISTORY_HEADERS)
-    ws = wb[core.HISTORY_SHEET_NAME]
-    rows = list(ws.iter_rows(min_row=2, values_only=True))
-    return pd.DataFrame(rows, columns=core.HISTORY_HEADERS)
-
-
-def show_summary(summary):
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Processed", len(summary["processed"]))
-    c2.metric("Skipped (already done)", len(summary["skipped"]))
-    c3.metric("Flagged for review", len(summary["flagged"]))
-
-    if summary["header_warnings"]:
-        with st.expander("⚠️ Header check warnings", expanded=False):
-            for w in summary["header_warnings"]:
-                st.write(f"- {w}")
-
-    if summary["processed"]:
-        st.success(
-            "Written to the workbook:\n\n"
-            + "\n".join(f"- **{f}** → rows {s}-{e}" for f, s, e in summary["processed"])
-        )
-    if summary["skipped"]:
-        st.info("Already processed previously, skipped:\n\n" + "\n".join(f"- {f}" for f in summary["skipped"]))
-    if summary["flagged"]:
-        st.warning("Could not confidently read these — logged as NEEDS REVIEW, nothing written:")
-        for fname, warnings in summary["flagged"]:
-            st.write(f"**{fname}**")
-            for w in warnings:
-                st.caption(f"  {w}")
-
-
-def show_history_from_workbook(path_or_buffer):
-    with st.expander("Processing history", expanded=False):
-        wb_preview = openpyxl.load_workbook(path_or_buffer, data_only=True)
-        df = get_history_df(wb_preview)
-        if df.empty:
-            st.write("No history yet.")
-        else:
-            st.dataframe(df)
-
-
-# ---------------------------------------------------------------------------
-# UI
-# ---------------------------------------------------------------------------
-
-st.title("SCL Excel Extractor")
-st.caption(
-    "Reads SCL stress-classification screenshots and fills the SX-SEQV columns "
-    "(C:M by default) of the first worksheet in your reference workbook, keeping "
-    "a history of every file processed."
-)
-
-MODES = ["Saved library", "One-off upload"]
-if not HOSTED:
-    MODES.append("Local folder (this machine only)")
-
-mode = st.radio(
-    "Mode",
-    MODES,
-    horizontal=True,
-    help="'Saved library' keeps your workbook and screenshot folders on the "
-         "server between sessions. 'One-off upload' keeps nothing. "
-         "'Local folder' reads/writes directly on this machine's disk.",
-)
-
-st.divider()
-
-# ---------------------------------------------------------------------------
-# Saved library mode (persistent)
-# ---------------------------------------------------------------------------
-if mode == "Saved library":
-    state = store.load_state()
-    workbooks = store.list_workbooks()
-    folders = store.list_folders()
-
-    col_wb, col_fd = st.columns(2)
-
-    # ---- Reference workbook ----
-    with col_wb:
-        st.subheader("Reference Excel")
-        if workbooks:
-            active_wb = state.get("active_workbook", "")
-            idx = workbooks.index(active_wb) if active_wb in workbooks else 0
-            wb_choice = st.selectbox("Reference workbook", workbooks, index=idx)
-        else:
-            wb_choice = ""
-            st.info("No workbook saved yet - upload one below.")
-
-        wb_upload = st.file_uploader("Add or replace a workbook", type=["xlsx"], key="wb_up")
-        if wb_upload is not None:
-            sig = (wb_upload.name, wb_upload.size)
-            if st.session_state.get("wb_up_sig") != sig:
-                st.session_state["wb_up_sig"] = sig
-                saved_name = store.save_workbook(wb_upload.name, wb_upload.getvalue())
-                state["active_workbook"] = saved_name
-                store.save_state(state)
-                st.success(f"Saved **{saved_name}** and made it the reference workbook.")
-                st.rerun()
-
-    # ---- Reference folder ----
-    with col_fd:
-        st.subheader("Reference folder")
-        if folders:
-            active_fd = state.get("active_folder", "")
-            idx = folders.index(active_fd) if active_fd in folders else 0
-            fd_choice = st.selectbox("Screenshot folder", folders, index=idx)
-        else:
-            fd_choice = ""
-            st.info("No folder yet - create one below.")
-
-        new_folder = st.text_input("Create a new folder", placeholder="e.g. Nozzle-N1")
-        if st.button("Create folder", disabled=not new_folder.strip()):
-            created = store.create_folder(new_folder)
-            state["active_folder"] = created
-            store.save_state(state)
-            st.success(f"Created folder **{created}**.")
-            st.rerun()
-
-    # Persist the current selection so it is still active next session.
-    if wb_choice != state.get("active_workbook") or fd_choice != state.get("active_folder"):
-        state["active_workbook"] = wb_choice
-        state["active_folder"] = fd_choice
-        store.save_state(state)
-
-    st.divider()
-
-    # ---- Screenshots in the active folder ----
-    if fd_choice:
-        st.subheader(f"Screenshots in {fd_choice}")
-
-        img_upload = st.file_uploader(
-            "Add screenshots to this folder",
-            type=["png", "jpg", "jpeg", "bmp", "tif", "tiff"],
-            accept_multiple_files=True,
-            key="img_up",
-        )
-        if img_upload:
-            sig = tuple((f.name, f.size) for f in img_upload)
-            if st.session_state.get("img_up_sig") != sig:
-                st.session_state["img_up_sig"] = sig
-                saved, replaced = store.save_images(
-                    fd_choice, [{"name": f.name, "data": f.getvalue()} for f in img_upload]
-                )
-                msg = f"Added {len(saved)} file(s) to **{fd_choice}**."
-                if replaced:
-                    msg += f" Replaced: {', '.join(replaced)}."
-                st.success(msg)
-                st.rerun()
-
-        images = store.list_images(fd_choice)
-        if images:
-            st.caption(f"{len(images)} image(s) in this folder:")
-            st.code("\n".join(images), language=None)
-        else:
-            st.caption("This folder is empty.")
-
-    st.divider()
-
-    ready = bool(wb_choice and fd_choice and store.list_images(fd_choice))
-    if st.button("Process new images now", type="primary", disabled=not ready):
-        cfg = {
-            "image_folder": store.folder_path(fd_choice),
-            "excel_path": store.workbook_path(wb_choice),
-            "tesseract_cmd": "",
-        }
-        try:
-            with st.spinner("Reading images and updating the workbook..."):
-                # process_folder writes the workbook back to the volume, so the
-                # updated data and the new history rows persist as one file.
-                st.session_state["lib_summary"] = core.process_folder(cfg)
-        except Exception as e:
-            st.error(str(e))
-
-    if "lib_summary" in st.session_state:
-        show_summary(st.session_state["lib_summary"])
-
-    if wb_choice:
-        wb_path = store.workbook_path(wb_choice)
-        if os.path.isfile(wb_path):
-            with open(wb_path, "rb") as f:
-                st.download_button(
-                    "Download updated workbook",
-                    data=f.read(),
-                    file_name=wb_choice,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-            st.caption(
-                "The saved copy on the server is the one that keeps its history. "
-                "Downloading takes a snapshot; it does not move the reference."
-            )
-            show_history_from_workbook(wb_path)
-
-    with st.expander("Manage saved data", expanded=False):
-        used, total = store.disk_usage()
-        st.caption(f"Volume: {used / 1e6:.0f} MB used of {total / 1e6:.0f} MB.")
-        d1, d2 = st.columns(2)
-        with d1:
-            if workbooks:
-                to_del = st.selectbox("Delete a workbook", [""] + workbooks, key="del_wb")
-                if st.button("Delete workbook", disabled=not to_del):
-                    store.delete_workbook(to_del)
-                    st.rerun()
-        with d2:
-            if folders:
-                fd_del = st.selectbox("Delete a folder (and its images)", [""] + folders, key="del_fd")
-                if st.button("Delete folder", disabled=not fd_del):
-                    store.delete_folder(fd_del)
-                    st.rerun()
-
-# ---------------------------------------------------------------------------
-# One-off upload mode
-# ---------------------------------------------------------------------------
-elif mode == "One-off upload":
-    col1, col2 = st.columns(2)
-    with col1:
-        excel_file = st.file_uploader("Reference Excel workbook", type=["xlsx"])
-    with col2:
-        image_files = st.file_uploader(
-            "Screenshot image(s)",
-            type=["png", "jpg", "jpeg", "bmp", "tif", "tiff"],
-            accept_multiple_files=True,
-        )
-
-    if excel_file is not None:
-        key = f"{excel_file.name}-{excel_file.size}"
-        if st.session_state.get("wb_key") != key:
-            st.session_state["wb_key"] = key
-            st.session_state["wb_bytes"] = excel_file.getvalue()
-            st.session_state["wb_name"] = excel_file.name
-
-    has_wb = "wb_bytes" in st.session_state
-
-    process_clicked = st.button(
-        "Process images",
-        type="primary",
-        disabled=not (has_wb and image_files),
+with images_column:
+    st.subheader("Screenshots")
+    uploads = st.file_uploader(
+        "SCL screenshots", type=IMAGE_TYPES, accept_multiple_files=True,
+        label_visibility="collapsed",
+    )
+    st.caption(
+        "Select every screenshot at once (Ctrl-click, or drag the whole "
+        "selection in). Only the table is used \u2014 the graph is never read."
     )
 
-    if process_clicked:
-        wb = openpyxl.load_workbook(io.BytesIO(st.session_state["wb_bytes"]))
-        image_items = [{"name": f.name, "data": f.getvalue()} for f in image_files]
-        with st.spinner("Reading images and updating the workbook..."):
-            summary = core.process_workbook(wb, image_items, source_label="Uploaded via Streamlit")
-        buf = io.BytesIO()
-        wb.save(buf)
-        st.session_state["wb_bytes"] = buf.getvalue()
-        st.session_state["last_summary"] = summary
-
-    if "last_summary" in st.session_state:
-        show_summary(st.session_state["last_summary"])
-
-    if has_wb:
-        st.download_button(
-            "Download updated workbook",
-            data=st.session_state["wb_bytes"],
-            file_name=st.session_state.get("wb_name", "updated.xlsx"),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+excel_path = None
+with excel_column:
+    st.subheader("Excel file")
+    if HOSTED:
+        workbook_upload = st.file_uploader(
+            "Excel workbook", type=["xlsx", "xlsm"], label_visibility="collapsed",
         )
         st.caption(
-            "Any formulas elsewhere in the workbook that depend on this data "
-            "(other tabs, or other columns on this sheet) will recalculate "
-            "automatically the next time you open the file in Excel."
+            "This copy of the app runs on Streamlit's server, which cannot see "
+            "your laptop. The workbook is updated here and handed back for you "
+            "to download over the original."
         )
-        show_history_from_workbook(io.BytesIO(st.session_state["wb_bytes"]))
+        if workbook_upload is not None:
+            excel_path = hosted_workbook(workbook_upload)
     else:
-        st.info("Upload a reference Excel workbook to get started.")
+        stored_path = local_config.get("excel_path", "")
+        if st.button("Browse\u2026", help="Opens this machine's file picker"):
+            picked = browse_for_excel()
+            if picked:
+                local_config.set_value("excel_path", picked)
+                st.rerun()
+        typed = st.text_input(
+            "Workbook path", value=stored_path,
+            placeholder="C:\\Users\\you\\Documents\\reference.xlsx",
+            label_visibility="collapsed",
+        )
+        if typed != stored_path:
+            local_config.set_value("excel_path", typed)
+            st.rerun()
+        st.caption(
+            "The full path to the workbook on this machine. It is edited and "
+            "saved in place, so the file never moves and there is nothing to "
+            "download."
+        )
+        if typed:
+            excel_path = Path(typed)
+
+excel_ready = bool(excel_path and excel_path.is_file())
+
+with excel_column:
+    if excel_path is None:
+        st.info("Choose the workbook to write into.")
+    elif not excel_ready:
+        st.error(f"No file at that path: `{excel_path}`")
+    else:
+        try:
+            sheet_name, landing_row = describe_target(excel_path)
+        except Exception as e:
+            st.error(f"Could not open the workbook: {e}")
+            excel_ready = False
+        else:
+            st.success(
+                f"**{excel_path.name}** \u2014 first worksheet *{sheet_name}*; "
+                f"the next block lands on row **{landing_row}**."
+            )
+
+# A screenshot already written into this workbook would otherwise be appended
+# a second time without complaint. Locally that is remembered across runs;
+# hosted, only for the workbook currently uploaded.
+if excel_ready and uploads:
+    if HOSTED:
+        seen = set(st.session_state.get("written_here", []))
+    else:
+        seen = local_config.written_images(excel_path)
+    already = seen & {u.name for u in uploads}
+    if already:
+        st.warning(
+            "**Already written into this workbook once:** "
+            + ", ".join(f"`{n}`" for n in sorted(already))
+            + ". Reading them again will add a second copy of those blocks."
+        )
+
 
 # ---------------------------------------------------------------------------
-# Local folder mode (never reachable when hosted)
+# 2. Find each table and read it
 # ---------------------------------------------------------------------------
-else:
-    cfg = core.load_config(CONFIG_PATH)
+st.divider()
+if "results" not in st.session_state:
+    st.session_state.results = []
 
-    col1, col2 = st.columns(2)
-    with col1:
-        folder = st.text_input("Image folder path", value=cfg.get("image_folder", ""))
-    with col2:
-        excel_path = st.text_input("Reference Excel file path", value=cfg.get("excel_path", ""))
+if st.button(
+    f"Extract {len(uploads)} table(s)" if uploads else "Extract tables",
+    type="primary", disabled=not (uploads and excel_ready),
+):
+    results, progress = [], st.progress(0.0, text="Reading\u2026")
+    for i, upload in enumerate(uploads):
+        progress.progress(i / len(uploads), text=f"Reading {upload.name}\u2026")
+        upload.seek(0)
+        entry = {"name": upload.name}
+        try:
+            crop, entry["rows"], entry["unreadable"] = read_table(upload)
+        except TableNotFound as e:
+            entry["error"] = f"No SCL table recognised: {e}."
+        except Exception as e:
+            entry["error"] = f"Could not read this image: {e}"
+        else:
+            preview = io.BytesIO()
+            crop.save(preview, format="PNG")
+            entry["crop"] = preview.getvalue()
+        results.append(entry)
+    progress.empty()
+    st.session_state.results = results
+    st.rerun()
 
-    tess_path = st.text_input(
-        "Tesseract-OCR path override (optional, only if not on your system PATH)",
-        value=cfg.get("tesseract_cmd", ""),
+
+# ---------------------------------------------------------------------------
+# 3. Review, then write
+# ---------------------------------------------------------------------------
+results = st.session_state.results
+if results:
+    st.subheader("Review before writing")
+    st.caption(
+        "Each table is shown under the part of the screenshot it was read from. "
+        "Correct anything wrong here \u2014 this is the last point before the "
+        "numbers reach the workbook."
     )
 
-    if st.button("Save settings"):
-        cfg["image_folder"] = folder
-        cfg["excel_path"] = excel_path
-        cfg["tesseract_cmd"] = tess_path
-        core.save_config(CONFIG_PATH, cfg)
-        st.success("Settings saved.")
+    edited_blocks = []
+    for entry in results:
+        name = entry["name"]
+        label = name
+        if entry.get("error"):
+            label += "  \u2014 not read"
+        elif entry.get("unreadable"):
+            label += f"  \u2014 {len(entry['unreadable'])} cell(s) need filling in"
+
+        with st.expander(label, expanded=len(results) == 1 or bool(entry.get("error"))):
+            if entry.get("error"):
+                st.error(entry["error"])
+                continue
+
+            st.image(entry["crop"], caption="What was read", width="stretch")
+
+            # A cell that did not come back as a number is left empty rather
+            # than guessed, and named here so it can be typed in below.
+            if entry["unreadable"]:
+                st.warning(
+                    "These cells could not be read as a number \u2014 fill them in "
+                    "from the image above:\n\n"
+                    + "\n".join(
+                        f"- {SUBTYPES[i]}, {COLUMNS[j]}"
+                        + (f" (read as `{raw}`)" if raw else "")
+                        for i, j, raw in entry["unreadable"]
+                    )
+                )
+
+            frame = pd.DataFrame(entry["rows"], columns=COLUMNS)
+            frame.insert(0, "Subtype", SUBTYPES)
+            edited = st.data_editor(
+                frame, width="stretch", hide_index=True, key=f"editor_{name}",
+                column_config={"Subtype": st.column_config.TextColumn(disabled=True)},
+            )
+            edited_blocks.append((name, edited[COLUMNS].values.tolist()))
 
     st.divider()
+    # Hosted, the original is still on the laptop -- that is the backup.
+    make_backup = False if HOSTED else st.checkbox(
+        "Copy the workbook beside itself before writing", value=True,
+        help="Saving rewrites the whole file. The copy makes a bad save undoable.",
+    )
 
-    process_clicked = st.button("Process new images now", type="primary")
-
-    if process_clicked:
-        cfg["image_folder"] = folder
-        cfg["excel_path"] = excel_path
-        cfg["tesseract_cmd"] = tess_path
+    target_name = excel_path.name if excel_ready else "the workbook"
+    if st.button(
+        f"Write {len(edited_blocks)} block(s) into {target_name}",
+        type="primary", disabled=not (edited_blocks and excel_ready),
+    ):
         try:
-            with st.spinner("Scanning folder and updating the workbook..."):
-                summary = core.process_folder(cfg)
-            st.session_state["last_summary_local"] = summary
+            written, skipped, backup = append_blocks(excel_path, edited_blocks, make_backup)
+        except PermissionError:
+            st.error(
+                f"**{excel_path.name} could not be written.** It is most likely "
+                "open in Excel \u2014 close it and press the button again."
+            )
         except Exception as e:
-            st.error(str(e))
+            st.error(f"**Could not write to {excel_path.name}:** {e}")
+        else:
+            if written:
+                sheet_name, _ = describe_target(excel_path)
+                where = excel_path.name if HOSTED else excel_path
+                st.success(
+                    f"Written into **{where}**, columns C:M of *{sheet_name}*:\n\n"
+                    + "\n".join(f"- {name} \u2192 rows {a}\u2013{b}" for name, a, b in written)
+                )
+                if backup:
+                    st.caption(f"Backup: `{backup.name}`")
+                names = [name for name, _, _ in written]
+                if HOSTED:
+                    st.session_state.written_here = (
+                        st.session_state.get("written_here", []) + names
+                    )
+                else:
+                    local_config.record_written(excel_path, names)
+                # Only the blocks that landed are cleared, so a rejected one
+                # stays on screen to be fixed and written again.
+                saved = set(names)
+                st.session_state.results = [r for r in results if r["name"] not in saved]
 
-    if "last_summary_local" in st.session_state:
-        show_summary(st.session_state["last_summary_local"])
+            if skipped:
+                st.warning(
+                    f"Not written \u2014 each screenshot must give {ROWS_PER_BLOCK} "
+                    "rows of 11 numbers:\n\n"
+                    + "\n".join(f"- **{name}**: {why}" for name, why in skipped)
+                    + "\n\nFill in the empty cells above and press the button again."
+                )
+            if written and not skipped:
+                st.rerun()
 
-    if excel_path and os.path.isfile(excel_path):
-        show_history_from_workbook(excel_path)
+
+# ---------------------------------------------------------------------------
+# 4. Hosted only: hand the updated workbook back
+# ---------------------------------------------------------------------------
+if HOSTED and excel_ready and st.session_state.get("written_here"):
+    st.divider()
+    st.subheader("Download the updated workbook")
+    st.caption(
+        "Save it over the original on your laptop. It holds every block "
+        "written in this session: "
+        + ", ".join(f"`{n}`" for n in st.session_state.written_here) + "."
+    )
+    st.download_button(
+        f"Download {excel_path.name}", data=excel_path.read_bytes(),
+        file_name=excel_path.name, mime=XLSX_MIME, type="primary",
+    )

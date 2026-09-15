@@ -1,187 +1,154 @@
-# SCL Excel Extractor
+# SCL Table → Excel
 
-Reads SCL (Stress Classification Line) result-table screenshots — like ANSYS's
-"SCL-N" worksheet view — from a folder, and writes the 6 rows x 11 columns of
-data (SX, SY, SZ, SXY, SYZ, SXZ, S1, S2, S3, SINT, SEQV) into the **C:M**
-columns of the **first worksheet** of your reference Excel file.
+Drop in SCL result screenshots, point at your workbook, and the six rows of
+numbers from each screenshot are written into **columns C:M of the first
+worksheet**, with one blank row between screenshots. The workbook is saved
+back to the path it already lives at.
 
-It picks up where the data already ends (or the next pre-numbered empty
-block, if your workbook already has SCL numbers filled in down column A),
-keeps a running history of every file it has processed, and skips files it
-has already handled so you can just keep dropping new screenshots into the
-same folder.
+The table is found and read with classical computer vision and the free
+Tesseract OCR engine. There's no AI model and no API key. Run it on your
+laptop and nothing leaves your machine; it can also be hosted on Streamlit
+Community Cloud (see below).
 
-## 1. One-time setup
+## The four steps
 
-1. Install Python 3.9+ if you don't have it: https://www.python.org/downloads/
-   (On Windows, tick "Add Python to PATH" during install.)
-2. Install **Tesseract OCR** (the engine that reads the text in the images):
-   - Windows: https://github.com/UB-Mannheim/tesseract/wiki — install it, then
-     note the install path (usually `C:\Program Files\Tesseract-OCR\tesseract.exe`).
-   - Mac: `brew install tesseract`
-   - Linux: `sudo apt install tesseract-ocr`
-3. Open a terminal / command prompt in this folder and run:
-   ```
-   pip install -r requirements.txt
-   ```
-4. If you're on Windows and step 2 didn't add Tesseract to your PATH, run:
-   ```
-   python run.py set-tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe"
-   ```
-   (Only needed once — it's saved in `config.json`.)
+1. **Screenshots on the left, the workbook on the right.** You upload the
+   screenshots. You choose the workbook by its path, because a browser upload
+   gives the file's bytes but never its path, and saving in place needs the path.
+2. **The table is found and the graph is left out.** The table's grid lines
+   are located in the image, and only the cells inside that grid are read. The
+   plot, axis labels and tab strip below are never looked at.
+3. **The numbers go into C:M**, six rows per screenshot. Each block starts one
+   blank row below the last row that has anything in C:M.
+4. **The workbook is saved to its own path.** There's no download and no copy
+   to move back.
 
-## 2. Point it at your folder and workbook
+## Setup
 
-```
-python run.py set-folder "C:\path\to\your\screenshots"
-python run.py set-excel  "C:\path\to\your\reference.xlsx"
-```
+1. Install **Tesseract OCR** once from
+   <https://github.com/UB-Mannheim/tesseract/wiki> with the default options.
+   It installs to `C:\Program Files\Tesseract-OCR\`, where the tool looks for
+   it automatically.
+2. Double-click **`Run SCL Tool.bat`**. The first run installs the Python
+   packages the tool needs, then opens it at <http://localhost:8501>.
 
-You can change either of these at any time — just run the same commands
-again with a new path, or use option 2 / 3 in the menu (see below).
+To run it by hand instead:
 
-## 3. Run it
-
-You have two options:
-
-### Option A — Streamlit web UI (recommended)
-
-```
-streamlit run app.py
+```powershell
+cd Bex\scl_tool
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
 ```
 
-This opens a browser tab with a simple UI. There are three modes, switchable
-at the top of the page:
+## Hosted on Streamlit Community Cloud
 
-- **Saved library** — the reference workbook and the screenshot folders are
-  kept in a persistent data directory, so they survive restarts. Pick the
-  active workbook and the active folder from dropdowns, drop screenshots into
-  the folder, and click **Process new images now**. Because the same `.xlsx`
-  file is reopened every time, its `Processing_History` tab keeps growing and
-  screenshots that were already read stay skipped across sessions. This is the
-  mode the hosted deployment exists for.
-- **One-off upload** — upload a workbook and one or more screenshots, click
-  **Process images**, then **Download updated workbook**. Nothing is kept
-  afterwards.
-- **Local folder (this machine only)** — same behavior as the command-line
-  tool: point at a folder and an Excel file by path, and it reads/writes those
-  files directly on disk. Hidden on a hosted deployment, which has no access
-  to your drive.
+The same app deploys unchanged: point Community Cloud at this repository with
+main file path **`Bex/scl_tool/app.py`**. It installs Tesseract from the
+repository-root `packages.txt` (Community Cloud only reads that file at the
+root) and the Python packages from `requirements.txt` beside the app.
 
-Every mode shows a **Processing history** panel (from the workbook's
-`Processing_History` tab) and a live summary of what was processed, skipped,
-or flagged for review.
+Hosted, one of the four steps works differently, because a server cannot
+reach your laptop:
 
-## 4. Hosted deployment (Fly.io)
+| | On your laptop | Hosted |
+|---|---|---|
+| Workbook in | chosen by path | uploaded |
+| Workbook out | saved in place | **downloaded**, then saved over the original |
+| Backup | copy beside the file | not needed: your original is untouched |
 
-The app is deployed at **https://bex-scl-tool.fly.dev/**.
+The app detects which mode it's in by itself: Community Cloud checks apps out
+under `/mount/src`. Setting `SCL_HOSTED=1` forces hosted mode anywhere else.
 
-A hosted app cannot see your computer's disk, so **Saved library** mode is the
-one to use there: the reference workbook and the screenshot folders live on a
-Fly volume mounted at `/data` rather than on your laptop. You upload
-screenshots into a named folder once, and both the folder and the workbook are
-still there next session, history and all.
+Uploaded files stay in the server's memory and a temporary folder for your
+session only. Nothing is shared between visitors or kept afterwards.
 
-To redeploy after changing the code:
+## How the table is read
 
-```
-cd Bex/scl_tool
-fly deploy --ha=false
-```
+The table is a drawn grid, so the tool locates every cell by geometry before
+it reads any text. Pixel values measured from a real screenshot:
 
-`--ha=false` matters: Streamlit keeps each session's state inside the process
-serving it, so a second machine would be a second unshared copy of the app
-rather than extra capacity.
-
-The page is open: anyone with the URL can use it, and can download whichever
-workbook is currently saved on the volume. If you ever want a password in front
-of it, no code change is needed:
-
-```
-fly secrets set SCL_PASSWORD=your-password --app bex-scl-tool
-```
-
-Run `fly secrets unset SCL_PASSWORD` to go back to open.
-
-**Streamlit Community Cloud** is an alternative host: push this folder to a
-GitHub repo and point Streamlit Cloud at `app.py`. The included `packages.txt`
-tells it to install Tesseract OCR automatically. Note that it gives you no
-persistent disk, so only **One-off upload** mode is useful there.
-
-### Option B — Command line
-
-Double-click **run.bat** (Windows) or **run.sh** (Mac/Linux), or from a
-terminal:
-
-```
-python run.py
-```
-
-This opens a small menu:
-
-```
-1) Process new images now
-2) Change reference image folder
-3) Change reference Excel file
-4) View processing history
-5) Set custom Tesseract-OCR path
-6) Exit
-```
-
-Pick **1** to scan the folder and fill in the workbook. You can also skip
-straight to processing with `python run.py process`.
-
-## 5. What it does with each image
-
-- Reads the 6-row table (Membrane / Bending (Inside) / Bending (Outside) /
-  Membrane+Bending (Inside) / Membrane+Bending (Center) / Membrane+Bending
-  (Outside)) and its 11 numeric columns.
-- Checks the workbook's first sheet for the next open spot: if some SCL
-  blocks are already filled in, it continues **beneath** the last filled
-  block (or into the next pre-numbered empty block, if your template already
-  has SCL numbers listed down column A).
-- Writes only into columns **C through M** — nothing else on the sheet is
-  touched, and the other 6+ tabs in the workbook are left completely alone.
-- Logs every file it touches — filename, source folder, detected SCL title,
-  which rows it wrote, and a status — to a **`Processing_History`** tab it
-  adds to the same workbook. This is what makes re-runs safe: a file that's
-  already logged as `OK` is skipped next time, even if you run it again.
-- If an image can't be read confidently (e.g. a blurry screenshot, or the
-  table layout doesn't match), it's **not** written to the data columns —
-  it's logged with status `NEEDS REVIEW` and the reason, so you can check it
-  by hand rather than risk bad numbers in the sheet.
-- It also does a quick sanity check that your workbook's C1:M1 headers still
-  read SX, SY, SZ, SXY, SYZ, SXZ, S1, S2, S3, SINT, SEQV, and warns you if
-  they don't line up — useful if you ever point it at a differently laid
-  out workbook.
-
-## 6. Notes and limitations
-
-- Works best on clean screen-captures like the sample you provided (crisp
-  rendered text, not a photo of a screen). Very low-resolution or heavily
-  compressed images will read less reliably.
-- Supported image types: `.png .jpg .jpeg .bmp .tif .tiff`.
-- The tool assumes the table always has the same 6 rows in the same order.
-  If a screenshot's table is laid out differently, it will likely get
-  flagged as `NEEDS REVIEW` rather than write incorrect data.
-- Everything runs locally on your machine — no data leaves your computer.
-- `config.json` (created after your first `set-folder` / `set-excel`) just
-  stores the two paths in plain text, so you can also edit it directly if
-  you prefer.
-
-## 7. Files in this folder
-
-| File | Purpose |
+| What | Grey level |
 |---|---|
-| `app.py` | Streamlit web UI |
-| `run.py` | Command-line menu / entry point |
-| `scl_core.py` | Extraction and Excel-writing logic (shared by both) |
-| `store.py` | Persistent server-side storage for Saved library mode |
-| `config.json` | Your saved folder + Excel paths (created on first use) |
-| `run.bat` / `run.sh` | Double-click launchers for the CLI, Windows / Mac-Linux |
-| `requirements.txt` | Python packages to install |
-| `packages.txt` | System package (Tesseract) for Streamlit Cloud deployment |
-| `Dockerfile` | Container image for the Fly.io deployment |
-| `entrypoint.sh` | Fixes volume ownership, then drops privileges |
-| `fly.toml` | Fly.io app config (volume, health check, scale-to-zero) |
-| `.dockerignore` | Keeps the desktop launchers out of the image |
+| Panel background | 160 |
+| Table grid lines | 192 |
+| Cell background | 255 (white) |
+
+- **Rows:** a grid line is a thin line that is non-white across the whole
+  width, with a row of white cells next to it. The table's lines come as an
+  evenly spaced run (8 lines, 17px apart), while the graph adds only a few
+  lines far below. The first tight run is the table.
+- **Columns:** within the table band, a vertical grid line is a narrow column
+  with almost no white, directly beside a white cell.
+- **Shape check:** the grid must have exactly 7 rows (a header plus 6 data
+  rows) and 12 columns (Subtype plus 11 values). Any other shape means the
+  table wasn't found. The tool then refuses the image rather than reading the
+  wrong boxes.
+- **Reading:** each of the 66 cells is cut out, enlarged 6×, surrounded by a
+  white margin, and read on its own by Tesseract. Only `0-9 . - e +` are
+  allowed. The Subtype label column is never read.
+
+Reading one cell at a time is what makes Tesseract work here. Pointed at the
+whole table, it returned the Membrane row as `'0273837205'`, `'21254-12686'`,
+`'-2.9965'`: decimal points lost and neighbouring values merged together.
+
+**Tested on:**
+
+- One real screenshot (SCL-10): all 66 values read exactly.
+- A synthetic table built from SCL-1's values, including scientific notation
+  such as `-4.0742e-002`: all 66 read exactly.
+- 10 unrelated screenshots: all correctly rejected as "no table".
+- The same checks on Linux (Debian 12, Tesseract 5.3.0, what Community Cloud
+  installs): 66/66 on both tables.
+
+These tests don't cover your other screenshots yet. Check the first few batches
+in the review step.
+
+## Where the numbers land
+
+The layout matches what the reference workbook already uses. Row 1 is the
+header (`C1:M1` = SX … SEQV), followed by blocks of six rows with one blank row
+between them. The tool doesn't touch column A (the SCL number) or column B
+(the row labels).
+
+```
+row 1     SX  SY  SZ ... SEQV     <- header, untouched
+rows 30-35   an existing block
+row 36       (blank)
+rows 37-42   the first screenshot written this run
+row 43       (blank)
+rows 44-49   the second
+```
+
+**"The last occupied row" means the last row with anything in C:M**, not the
+last row on the sheet. This matters for the real workbook: column A is
+pre-numbered with empty blocks far below where the data stops (numbers at rows
+37, 44, 51 … while C:M ends at row 35). Counting the whole sheet would push
+each new block hundreds of rows down. Counting only C:M puts it at row 37,
+exactly on the next pre-numbered block.
+
+## Review before writing
+
+Each table appears under the part of the screenshot it came from, in an
+editable grid. The tool does no checking of what the numbers mean. The only
+checks are structural:
+
+- **A cell that doesn't read as a number is left empty.** It's never guessed.
+  The tool lists it by row and column so you can type it in.
+- **A screenshot that doesn't give exactly 6 rows of 11 numbers isn't written.**
+  It stays on screen so you can fix it and press the button again. A partial
+  block never reaches the sheet.
+
+## Notes
+
+- **Close the workbook in Excel before saving.** Excel locks the file while
+  it's open, and the tool tells you when that's the problem.
+- **A backup is made by default** next to the workbook (for example
+  `name.backup-20260915-102459.xlsx`). A checkbox turns it off. Saving rewrites
+  the whole file through openpyxl, so anything openpyxl doesn't support would
+  be lost. The reference workbook contains only sheets, values and merged
+  cells, all of which survive, but the backup lets you undo a bad save.
+- **Reading the same screenshot again adds a second block.** The tool
+  remembers which screenshots went into which workbook and warns you, but it
+  doesn't stop you.
+- The column and row counts are fixed to the SCL worksheet layout. A
+  screenshot of a different table is refused, not misread.
