@@ -27,14 +27,15 @@ if errorlevel 1 (
     )
 )
 
+REM Tesseract is only a fallback, for cells that do not match the ANSYS font.
+REM Screenshots taken straight from ANSYS are read without it.
 if not exist "C:\Program Files\Tesseract-OCR\tesseract.exe" (
     where tesseract >nul 2>&1
     if errorlevel 1 (
-        echo Tesseract OCR is not installed. It reads the numbers in each cell.
-        echo Install it from https://github.com/UB-Mannheim/tesseract/wiki
-        echo with the default options, then run this file again.
-        pause
-        exit /b 1
+        echo Note: Tesseract OCR is not installed. The tool works without it, but
+        echo cells that do not match the ANSYS font will be left for you to type in.
+        echo Optional install: https://github.com/UB-Mannheim/tesseract/wiki
+        echo.
     )
 )
 

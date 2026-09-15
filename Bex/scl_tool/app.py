@@ -2,8 +2,10 @@
 SCL screenshots -> the C:M columns of a workbook's first worksheet.
 
 Everything is read on the machine running the app: the table is found with
-classical computer vision and read by Tesseract, with no model, no API key and
-nothing sent anywhere.
+classical computer vision and each cell is read by matching its pixels
+against the ANSYS font's own glyph shapes, with no model, no API key and
+nothing sent anywhere. Tesseract is only a fallback for cells that don't
+match, and those are flagged for checking.
 
 It runs in one of two places, and step four -- saving the workbook -- differs
 between them because of what each can reach:
@@ -25,7 +27,7 @@ import streamlit as st
 
 import local_config
 from excel_write import ROWS_PER_BLOCK, append_blocks, describe_target
-from table_read import COLUMNS, SUBTYPES, TableNotFound, find_tesseract, read_table
+from table_read import COLUMNS, SUBTYPES, TableNotFound, read_table
 
 IMAGE_TYPES = ["png", "jpg", "jpeg", "bmp", "tif", "tiff"]
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -44,15 +46,6 @@ st.caption(
     "from its graph, read cell by cell, and written into columns C:M of the "
     "first worksheet \u2014 six rows per screenshot, one blank row between."
 )
-
-if not find_tesseract():
-    st.error(
-        "**Tesseract is not installed** (or not where this tool looked). It is "
-        "the free OCR engine that reads each cell. Install it from "
-        "https://github.com/UB-Mannheim/tesseract/wiki with the default "
-        "options, then refresh this page."
-    )
-    st.stop()
 
 
 def browse_for_excel():
@@ -204,7 +197,7 @@ if st.button(
         upload.seek(0)
         entry = {"name": upload.name}
         try:
-            crop, entry["rows"], entry["unreadable"] = read_table(upload)
+            crop, entry["rows"], entry["unreadable"], entry["uncertain"] = read_table(upload)
         except TableNotFound as e:
             entry["error"] = f"No SCL table recognised: {e}."
         except Exception as e:
@@ -237,8 +230,10 @@ if results:
         label = name
         if entry.get("error"):
             label += "  \u2014 not read"
-        elif entry.get("unreadable"):
-            label += f"  \u2014 {len(entry['unreadable'])} cell(s) need filling in"
+        else:
+            todo = len(entry.get("unreadable", [])) + len(entry.get("uncertain", []))
+            if todo:
+                label += f"  \u2014 {todo} cell(s) to check"
 
         with st.expander(label, expanded=len(results) == 1 or bool(entry.get("error"))):
             if entry.get("error"):
@@ -257,6 +252,20 @@ if results:
                         f"- {SUBTYPES[i]}, {COLUMNS[j]}"
                         + (f" (read as `{raw}`)" if raw else "")
                         for i, j, raw in entry["unreadable"]
+                    )
+                )
+
+            # Cells whose pixels did not match the ANSYS font closely were read
+            # by Tesseract instead. That reader guesses, so each is named here to
+            # be checked, rather than trusted the way a shape match is.
+            if entry.get("uncertain"):
+                st.warning(
+                    "These cells did not match the ANSYS font closely, so they "
+                    "were read a less reliable way — check each against the "
+                    "image above:\n\n"
+                    + "\n".join(
+                        f"- {SUBTYPES[i]}, {COLUMNS[j]}: read as `{value}`"
+                        for i, j, value in entry["uncertain"]
                     )
                 )
 

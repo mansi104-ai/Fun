@@ -5,10 +5,11 @@ numbers from each screenshot are written into **columns C:M of the first
 worksheet**, with one blank row between screenshots. The workbook is saved
 back to the path it already lives at.
 
-The table is found and read with classical computer vision and the free
-Tesseract OCR engine. There's no AI model and no API key. Run it on your
-laptop and nothing leaves your machine; it can also be hosted on Streamlit
-Community Cloud (see below).
+The table is found with classical computer vision, and each number is read
+by matching its pixels against the exact shapes of the characters in the
+ANSYS font. There's no AI model and no API key. Run it on your laptop and
+nothing leaves your machine; it can also be hosted on Streamlit Community
+Cloud (see below).
 
 ## The four steps
 
@@ -25,10 +26,11 @@ Community Cloud (see below).
 
 ## Setup
 
-1. Install **Tesseract OCR** once from
+1. *(Optional)* Install **Tesseract OCR** from
    <https://github.com/UB-Mannheim/tesseract/wiki> with the default options.
-   It installs to `C:\Program Files\Tesseract-OCR\`, where the tool looks for
-   it automatically.
+   Screenshots taken straight from ANSYS are read without it. It's only a
+   fallback for cells that don't match the ANSYS font, and those cells are
+   flagged for you to check either way.
 2. Double-click **`Run SCL Tool.bat`**. The first run installs the Python
    packages the tool needs, then opens it at <http://localhost:8501>.
 
@@ -83,25 +85,40 @@ it reads any text. Pixel values measured from a real screenshot:
   rows) and 12 columns (Subtype plus 11 values). Any other shape means the
   table wasn't found. The tool then refuses the image rather than reading the
   wrong boxes.
-- **Reading:** each of the 66 cells is cut out, enlarged 6×, surrounded by a
-  white margin, and read on its own by Tesseract. Only `0-9 . - e +` are
-  allowed. The Subtype label column is never read.
+- **Reading:** ANSYS draws every number in one screen font, Segoe UI 9pt.
+  Every digit is exactly 6px wide (`.` is 3px, `-` 5px, `e` 6px, `+` 8px), and
+  every "5" is pixel-for-pixel the same "5". `glyphs.json` holds the shape of
+  each character. A cell is read as the sequence of characters whose shapes,
+  placed side by side, reproduce its pixels most closely. This works even
+  though ClearType smears neighbouring digits together with no gap between
+  them. The Subtype label column is never read.
+- **Confidence:** each reading gets a mismatch score, where 0 means identical
+  pixels. Genuine ANSYS text scores 0.00–0.10; a different font scores above
+  0.4. A cell scoring over 0.25 isn't trusted: it's handed to Tesseract
+  instead and **flagged for you to check**. It's never accepted silently.
 
-Reading one cell at a time is what makes Tesseract work here. Pointed at the
-whole table, it returned the Membrane row as `'0273837205'`, `'21254-12686'`,
-`'-2.9965'`: decimal points lost and neighbouring values merged together.
+The digits, `.` and `-` were cut from a real ANSYS screenshot. `e` and `+`
+don't appear in that screenshot, so they were drawn by Windows in Segoe UI
+9pt ClearType, the one font whose character widths match exactly.
+
+Why not Tesseract as the main reader: it guesses. On the SCL-1 screenshot it
+read `5.0275` as `9.0275` and `5.0026` as `3.0026`, and on a faithful
+re-rendering of that same table it got six cells wrong, most of them 5s.
 
 **Tested on:**
 
-- One real screenshot (SCL-10): all 66 values read exactly.
-- A synthetic table built from SCL-1's values, including scientific notation
-  such as `-4.0742e-002`: all 66 read exactly.
+- The real SCL-10 screenshot: 66/66 exact, mismatch 0.000, in half a second.
+  Learning the shapes from half the cells and reading the other half gave
+  66/66 as well, so this isn't a case of testing on the training data.
+- SCL-1's exact values (including `5.0275`, `5.0026` and every `e-002`)
+  drawn by Windows in the ANSYS font: 66/66 exact, none flagged.
+- A table in a different font (Tahoma): all 66 cells flagged for checking,
+  none accepted silently.
 - 10 unrelated screenshots: all correctly rejected as "no table".
-- The same checks on Linux (Debian 12, Tesseract 5.3.0, what Community Cloud
-  installs): 66/66 on both tables.
 
-These tests don't cover your other screenshots yet. Check the first few batches
-in the review step.
+The one thing still to confirm is a real ANSYS screenshot containing
+scientific notation. SCL-1 itself is the ideal test, and any cell that doesn't
+match would show up flagged rather than wrong.
 
 ## Where the numbers land
 
@@ -134,6 +151,9 @@ checks are structural:
 
 - **A cell that doesn't read as a number is left empty.** It's never guessed.
   The tool lists it by row and column so you can type it in.
+- **A cell that didn't match the font closely is flagged.** It was read by
+  the fallback, so the tool lists it with the value it got, and you check it
+  against the image.
 - **A screenshot that doesn't give exactly 6 rows of 11 numbers isn't written.**
   It stays on screen so you can fix it and press the button again. A partial
   block never reaches the sheet.

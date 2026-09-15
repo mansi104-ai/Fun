@@ -2,19 +2,12 @@
 Finds the SCL results table in a screenshot and reads its 6 x 11 numbers.
 
 Classical computer vision only -- no model, no API key, nothing over the
-network. The whole approach rests on the table being a drawn grid, which it
-is, so the cells can be located geometrically before a single character is
-read.
+network. The table is a drawn grid, so the cells are located geometrically
+first; then each cell is read by matching its pixels against the shapes of
+the ANSYS font's characters (see "Reading the cells" below).
 
-Why that matters: reading these tables by pointing OCR at the whole image does
-not work. Tried that way, Tesseract returned the Membrane row as '0273837205',
-'21254-12686', '-2.9965' -- decimal points gone, two values merged into one
-token -- and picked up the Geometry/Worksheet tab strip as extra rows. Reading
-one *cell* at a time is a different problem: the box is known, it holds exactly
-one number, and the only characters possible are digits and "-.e+". On a real
-screenshot that reads 66 of 66 values exactly.
-
-The pixel facts it keys on, measured from a real 968x823 screenshot:
+The pixel facts the grid search keys on, measured from a real 968x823
+screenshot:
 
     panel background   160    the grey around the table
     table rules        192    the 1px lines of the grid
@@ -26,10 +19,14 @@ The graph never enters the picture: only the cells inside the found grid are
 read, and the plot lies hundreds of pixels below the last of them.
 """
 
+import json
 import os
+import re
 import shutil
+from pathlib import Path
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 from PIL import Image, ImageOps
 
 NON_WHITE = 200           # grey 160 and rule 192 fall below it; cells (255) don't
@@ -199,30 +196,125 @@ def crop_to_table(image, h_rules, pad=6):
 # ---------------------------------------------------------------------------
 # Reading the cells
 # ---------------------------------------------------------------------------
+#
+# ANSYS draws every number in one screen font, Segoe UI 9pt, with no
+# kerning: each digit is 6px wide, "." 3px, "-" 5px, "e" 6px, "+" 8px, and
+# every "5" is pixel-for-pixel the same "5". So a cell is read by matching
+# shapes, not by guessing: glyphs.json holds the ink map of each character,
+# and a cell is decoded as the run of characters whose shapes, laid side by
+# side, reproduce its pixels most closely.
+#
+# That replaced Tesseract as the reader because Tesseract guesses. On the
+# SCL-1 screenshot it read 5.0275 as 9.0275 and 5.0026 as 3.0026; on a
+# faithful re-rendering of the same table it got six cells wrong, most of them
+# 5s. Shape matching reads that re-rendering 66/66, and a real screenshot
+# 66/66 with a mismatch of exactly zero.
+#
+# The digits, "." and "-" in glyphs.json were cut from a real ANSYS
+# screenshot; "e" and "+" (absent from it) were drawn by Windows in Segoe UI
+# 9pt ClearType, the one font whose widths match the screenshot exactly.
 
-def _cell_image(gray, h_rules, v_rules, row, column):
-    """
-    One cell, prepared for OCR: upscaled, then set in a white margin.
+GLYPHS_FILE = Path(__file__).with_name("glyphs.json")
+# Mismatch is the leftover pixel error as a share of the cell's ink: 0 means
+# identical. Genuine ANSYS text scores 0.00-0.10 (ClearType settings differ a
+# little between machines); a different font scores above 0.4. Anything over
+# the threshold is not trusted and goes to Tesseract, flagged for checking.
+MATCH_THRESHOLD = 0.25
+VERTICAL_SEARCH = 3       # rows up or down the text may sit from where it was measured
+NUMBER = re.compile(r"-?\d+(\.\d*)?(e[+-]\d+)?$")
 
-    The raw ~47x16 box is below what Tesseract can handle, and it reads a line
-    more reliably with space around it than with glyphs touching the edge.
-    Measured on a real screenshot plus a synthetic one full of e-002 values,
-    the margin took the synthetic from 65/66 to 66/66; binarizing made it worse.
-    """
+_glyphs = None
+
+
+def _load_glyphs():
+    global _glyphs
+    if _glyphs is None:
+        raw = json.loads(GLYPHS_FILE.read_text(encoding="utf-8"))
+        _glyphs = {ch: np.array(rows, dtype=float) for ch, rows in raw.items()}
+    return _glyphs
+
+
+def _cell_ink(gray, h_rules, v_rules, row, column):
+    """One cell as an ink map: 0 where the paper is white, 1 where it is black."""
     top, bottom = h_rules[row + 1] + 1, h_rules[row + 2]
     left, right = v_rules[column + 1] + 1, v_rules[column + 2]
-    cell = Image.fromarray(gray[top:bottom, left:right])
+    return 1.0 - gray[top:bottom, left:right].astype(float) / 255.0
+
+
+def _decode(ink, glyphs):
+    """
+    The character string whose glyphs best reproduce this strip of ink.
+
+    Dynamic programming across the columns: every column is either blank or
+    the start of a glyph, and the cheapest way to explain the whole strip wins.
+    It needs no gaps between characters, which matters -- ClearType smears
+    neighbouring digits together, so "386" is one unbroken blot of ink.
+    Returns (text, mismatch).
+    """
+    height, width = ink.shape
+    blank = (ink ** 2).sum(axis=0)
+    costs = {}
+    for ch, shape in glyphs.items():
+        w = shape.shape[1]
+        if w <= width:
+            windows = sliding_window_view(ink, (height, w))[0]
+            costs[ch] = ((windows - shape) ** 2).sum(axis=(1, 2))
+
+    best = np.full(width + 1, np.inf)
+    best[0] = 0.0
+    back = [None] * (width + 1)
+    for x in range(width):
+        so_far = best[x]
+        if not np.isfinite(so_far):
+            continue
+        if so_far + blank[x] < best[x + 1]:
+            best[x + 1], back[x + 1] = so_far + blank[x], (x, "")
+        for ch, cost in costs.items():
+            end = x + glyphs[ch].shape[1]
+            if end <= width and so_far + cost[x] < best[end]:
+                best[end], back[end] = so_far + cost[x], (x, ch)
+
+    text, x = [], width
+    while x > 0:
+        x, ch = back[x]
+        text.append(ch)
+    return "".join(reversed(text)), best[width] / max((ink ** 2).sum(), 1e-6)
+
+
+def _match_shapes(ink):
+    """
+    Decode a cell by glyph shape. Returns (value or None, mismatch).
+
+    The text is tried a few rows up and down from where it was measured, so a
+    screenshot framed a pixel differently still lines up.
+    """
+    glyphs = _load_glyphs()
+    glyph_height = next(iter(glyphs.values())).shape[0]
+    padded = np.pad(ink, ((VERTICAL_SEARCH, VERTICAL_SEARCH), (0, 0)))
+    tries = [
+        _decode(padded[dy:dy + glyph_height], glyphs)
+        for dy in range(0, padded.shape[0] - glyph_height + 1)
+    ]
+    if not tries:
+        return None, float("inf")
+    text, mismatch = min(tries, key=lambda t: t[1])
+    if not NUMBER.match(text):
+        return None, mismatch
+    return float(text), mismatch
+
+
+def _tesseract_image(ink):
+    """A cell prepared for Tesseract: upscaled and set in a white margin."""
+    cell = Image.fromarray(((1.0 - ink) * 255).clip(0, 255).astype(np.uint8))
     cell = cell.resize((cell.width * UPSCALE, cell.height * UPSCALE), Image.LANCZOS)
     return ImageOps.expand(cell, border=OCR_MARGIN, fill=255)
 
 
 def _to_number(text):
-    """The cell's text as a float, or None if it isn't one."""
+    """Tesseract's text as a float, or None if it isn't one."""
     text = text.strip().replace(" ", "")
-    if not text:
-        return None
     try:
-        return float(text)
+        return float(text) if text else None
     except ValueError:
         return None
 
@@ -231,39 +323,45 @@ def read_cells(image, h_rules, v_rules, tesseract_cmd=None):
     """
     Read every cell of the found grid.
 
-    Returns (rows, unreadable) -- rows is 6 lists of 11 values, each a float or
-    None, and unreadable lists (row, column, raw text) for the cells that did
-    not come back as a number, so they can be pointed at rather than guessed.
+    Returns (rows, unreadable, uncertain):
+      rows        6 lists of 11 values, each a float or None
+      unreadable  (row, column, raw text) for cells with no number at all
+      uncertain   (row, column, value) for cells whose shapes did not match the
+                  ANSYS font closely, so Tesseract read them instead -- these
+                  are the ones worth checking against the image
+
+    Tesseract is only needed for the fallback. If it is not installed, a cell
+    that needs it is left empty rather than guessed.
     """
-    import pytesseract
-
-    binary = tesseract_cmd or find_tesseract()
-    if not binary:
-        raise TableNotFound(
-            "Tesseract is not installed, or not where this tool looked. "
-            "Install it from https://github.com/UB-Mannheim/tesseract/wiki "
-            "and it will be found automatically."
-        )
-    pytesseract.pytesseract.tesseract_cmd = binary
-
     gray = np.asarray(image.convert("L"))
-    rows, unreadable = [], []
+    binary = tesseract_cmd or find_tesseract()
+    rows, unreadable, uncertain = [], [], []
     for i in range(len(SUBTYPES)):
         values = []
         for j in range(len(COLUMNS)):
-            text = pytesseract.image_to_string(
-                _cell_image(gray, h_rules, v_rules, i, j), config=OCR_CONFIG
-            )
-            value = _to_number(text)
+            ink = _cell_ink(gray, h_rules, v_rules, i, j)
+            value, mismatch = _match_shapes(ink)
+            if value is not None and mismatch <= MATCH_THRESHOLD:
+                values.append(value)
+                continue
+
+            raw, value = "", None
+            if binary:
+                import pytesseract
+                pytesseract.pytesseract.tesseract_cmd = binary
+                raw = pytesseract.image_to_string(_tesseract_image(ink), config=OCR_CONFIG).strip()
+                value = _to_number(raw)
             if value is None:
-                unreadable.append((i, j, text.strip()))
+                unreadable.append((i, j, raw))
+            else:
+                uncertain.append((i, j, value))
             values.append(value)
         rows.append(values)
-    return rows, unreadable
+    return rows, unreadable, uncertain
 
 
 def read_table(source, tesseract_cmd=None):
-    """Grid, crop and numbers in one call. Returns (crop, rows, unreadable)."""
+    """Grid, crop and numbers in one call. Returns (crop, rows, unreadable, uncertain)."""
     image, h_rules, v_rules = find_grid(source)
-    rows, unreadable = read_cells(image, h_rules, v_rules, tesseract_cmd)
-    return crop_to_table(image, h_rules), rows, unreadable
+    rows, unreadable, uncertain = read_cells(image, h_rules, v_rules, tesseract_cmd)
+    return crop_to_table(image, h_rules), rows, unreadable, uncertain
