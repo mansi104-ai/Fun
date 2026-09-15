@@ -269,16 +269,23 @@ if results:
                     )
                 )
 
-            frame = pd.DataFrame(entry["rows"], columns=COLUMNS)
+            # Values are shown as text, in Python's shortest exact form, so the
+            # table shows precisely the digits that were read. Both number
+            # formats Streamlit offers get this wrong: the default rounds to
+            # four decimals (-0.13152 showed as -0.1315), and "plain" prints
+            # twenty, exposing binary floating-point noise (29.533 showed as
+            # 29.532999999999999...). excel_write turns the text back into
+            # numbers.
+            frame = pd.DataFrame(
+                [[None if v is None else repr(v) for v in row] for row in entry["rows"]],
+                columns=COLUMNS,
+            )
             frame.insert(0, "Subtype", SUBTYPES)
-            # "plain" shows every digit that was read. Streamlit's default
-            # display rounds floats to four decimals, which made -0.13152 look
-            # like -0.1315 here even though the full value reached the sheet.
             edited = st.data_editor(
                 frame, width="stretch", hide_index=True, key=f"editor_{name}",
                 column_config={
                     "Subtype": st.column_config.TextColumn(disabled=True),
-                    **{c: st.column_config.NumberColumn(format="plain") for c in COLUMNS},
+                    **{c: st.column_config.TextColumn() for c in COLUMNS},
                 },
             )
             edited_blocks.append((name, edited[COLUMNS].values.tolist()))

@@ -15,6 +15,7 @@ whole sheet would push every new block hundreds of rows down; measuring C:M
 puts it at row 37, landing exactly on the next pre-numbered block.
 """
 
+import math
 import shutil
 from datetime import datetime
 
@@ -27,21 +28,27 @@ ROWS_PER_BLOCK = 6
 
 
 def as_number(value):
-    """Parse one reviewed cell into a float, or None if it isn't a number."""
+    """
+    Parse one reviewed cell into a float, or None if it isn't a number.
+
+    An emptied cell comes back from the review table as NaN (or the text
+    "nan"), not None. NaN is a float, so without the explicit check it would
+    count as a value and be written into the sheet as a number that isn't one.
+    """
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        return float(value)
-    text = str(value).strip().replace(",", "")
-    if not text:
-        return None
-    # A minus sign pasted from elsewhere is often an en-dash; keep the sign
-    # rather than losing the value to it.
-    text = text.replace("–", "-").replace("—", "-").replace("−", "-")
-    try:
-        return float(text)
-    except ValueError:
-        return None
+        number = float(value)
+    else:
+        text = str(value).strip().replace(",", "")
+        # A minus sign pasted from elsewhere is often an en-dash; keep the
+        # sign rather than losing the value to it.
+        text = text.replace("–", "-").replace("—", "-").replace("−", "-")
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+    return number if math.isfinite(number) else None
 
 
 def next_block_row(worksheet):
