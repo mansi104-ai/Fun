@@ -262,9 +262,15 @@ if results:
 
             frame = pd.DataFrame(entry["rows"], columns=COLUMNS)
             frame.insert(0, "Subtype", SUBTYPES)
+            # "plain" shows every digit that was read. Streamlit's default
+            # display rounds floats to four decimals, which made -0.13152 look
+            # like -0.1315 here even though the full value reached the sheet.
             edited = st.data_editor(
                 frame, width="stretch", hide_index=True, key=f"editor_{name}",
-                column_config={"Subtype": st.column_config.TextColumn(disabled=True)},
+                column_config={
+                    "Subtype": st.column_config.TextColumn(disabled=True),
+                    **{c: st.column_config.NumberColumn(format="plain") for c in COLUMNS},
+                },
             )
             edited_blocks.append((name, edited[COLUMNS].values.tolist()))
 

@@ -147,6 +147,11 @@ checks are structural:
   the whole file through openpyxl, so anything openpyxl doesn't support would
   be lost. The reference workbook contains only sheets, values and merged
   cells, all of which survive, but the backup lets you undo a bad save.
+- **Values are written exactly as read, every digit.** The cells the tool
+  writes are set to Excel's General format. Some empty cells in the reference
+  workbook still carry an old `0.00E+00` format that would show `-0.040742` as
+  `-4.07E-02`. A screenshot only holds the digits ANSYS printed (5 significant
+  figures), so that is the most precision any reader can recover from it.
 - **Reading the same screenshot again adds a second block.** The tool
   remembers which screenshots went into which workbook and warns you, but it
   doesn't stop you.

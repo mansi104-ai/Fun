@@ -110,7 +110,12 @@ def append_blocks(excel_path, blocks, make_backup=True):
         start = next_block_row(worksheet)
         for i, values in enumerate(rows):
             for j, value in enumerate(values):
-                worksheet.cell(row=start + i, column=FIRST_COL + j, value=value)
+                cell = worksheet.cell(row=start + i, column=FIRST_COL + j, value=value)
+                # Some empty cells in the reference workbook still carry a
+                # 0.00E+00 format, left behind by earlier pasting, which
+                # would show -0.040742 as -4.07E-02. General shows the whole
+                # value as read.
+                cell.number_format = "General"
         written.append((name, start, start + ROWS_PER_BLOCK - 1))
 
     workbook.save(excel_path)
