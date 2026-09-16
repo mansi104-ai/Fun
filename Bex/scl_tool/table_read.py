@@ -37,6 +37,7 @@ MAX_RULE_GAP = 40         # rules sit ~17px apart; the graph's lines are ~250px
 MIN_RULES = 4
 COLUMN_WHITE_FRACTION = 0.15
 CELL_ROW_FRACTION = 0.30  # a row of cells is ~70% white; a rule row is ~0%
+MAX_RULE_PITCH_DRIFT = 1.5  # a missing middle rule leaves a gap of ~2 pitches
 
 # The SCL worksheet always has a Subtype column plus these 11, and six rows
 # under one header row. Those counts are the grid's shape, so finding a
@@ -128,6 +129,59 @@ def _horizontal_rules(gray):
     return cluster if len(cluster) >= MIN_RULES else None
 
 
+def _close_clipped_last_row(gray, rules):
+    """
+    Close off a last row whose bottom rule is not in the picture.
+
+    The worksheet pane is often sized so that the sixth row is the last thing
+    it shows, and the rule beneath it falls under the Geometry/Worksheet tab
+    strip: the numbers are all there, but only seven of the eight rules are.
+    So when white cells carry on below the last rule for most of a row's
+    height, that band is the sixth row, and it is closed at one row's pitch
+    below the rule -- or at the cut, whichever comes first.
+
+    Returns the extended rules, or None when the rule missing is not the last
+    one at all -- the rules are unevenly spaced then, and the caller should
+    report the row count rather than blame the crop. Raises TableNotFound when
+    it *is* the last row but the cut went through the digits, which would be
+    read as some other number rather than not read at all.
+    """
+    height, width = gray.shape
+    gaps = np.diff(rules)
+    pitch = int(np.median(gaps))
+    if pitch < 1 or gaps.max() > MAX_RULE_PITCH_DRIFT * pitch:
+        return None
+
+    cell_row = (gray >= WHITE).sum(axis=1) >= CELL_ROW_FRACTION * width
+    y = rules[-1] + 1
+    while y < height and cell_row[y]:
+        y += 1
+    y = min(y, rules[-1] + pitch)
+    if y - rules[-1] - 1 < _readable_row_height():
+        raise TableNotFound(
+            f"the {SUBTYPES[-1]} row is cut off at the bottom of this image, so "
+            "its numbers cannot be read -- re-take the screenshot with a little "
+            "space below the table"
+        )
+    return rules + [y]
+
+
+def _readable_row_height():
+    """
+    The shortest cell band the glyph matcher can still read exactly.
+
+    A glyph box is blank for its last few rows, so a row cut off inside that
+    blank margin loses nothing: the matcher pads the band back out and scores
+    an identical match. Cut one row higher and the digits themselves are
+    sliced, so the shapes no longer match and the cell falls to Tesseract --
+    which, on a half-digit, answers 2.4 where the table said 20.264. Refusing
+    is the better answer there, so this is where the recovery stops.
+    """
+    glyphs = _load_glyphs()
+    inked = np.concatenate(list(glyphs.values()), axis=1).sum(axis=1)
+    return int(np.max(np.nonzero(inked))) + 1
+
+
 def _vertical_rules(gray, top, bottom):
     """
     Column indices of the grid's vertical rules, within the table's own band.
@@ -167,6 +221,8 @@ def find_grid(source):
     h_rules = _horizontal_rules(gray)
     if not h_rules:
         raise TableNotFound("no table grid found in this image")
+    if len(h_rules) == EXPECTED_H_RULES - 1:
+        h_rules = _close_clipped_last_row(gray, h_rules) or h_rules
     if len(h_rules) != EXPECTED_H_RULES:
         raise TableNotFound(
             f"found {len(h_rules) - 1} table rows, expected "
