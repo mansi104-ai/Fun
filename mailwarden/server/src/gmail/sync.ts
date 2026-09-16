@@ -404,14 +404,14 @@ async function fullSync(accountId: string, maxMessages?: number): Promise<void> 
  * messages — a third of the mailbox — because one auto-reply or forward is
  * enough to trip it.
  */
-const REPLY_RATIO_THRESHOLD = 0.25;
+export const REPLY_RATIO_THRESHOLD = 0.25;
 
 /**
  * Addresses that cannot receive a reply by construction. A thread that appears
  * to contain a reply to one of these is a forward or a Gmail threading
  * artifact, never a conversation.
  */
-const UNREPLIABLE = /^(no-?reply|do-?not-?reply|donotreply|noreply|notifications?|mailer-daemon)[.+@-]/i;
+export const UNREPLIABLE = /^(no-?reply|do-?not-?reply|donotreply|noreply|notifications?|mailer-daemon)[.+@-]/i;
 
 /**
  * Collapses messages_meta into one row per sender. This is the step that turns

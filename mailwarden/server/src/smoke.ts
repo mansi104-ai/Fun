@@ -47,8 +47,16 @@ import {
   refundMessagesCleaned,
   setPlan,
 } from "./lib/entitlements.js";
+import { SANDBOX_INBOX, resolve as resolveSandbox } from "./sandbox/catalog.js";
+import { GUARDS, runSandbox } from "./sandbox/run.js";
 import { DAY_MS, LIMITS } from "./safety/limits.js";
-import { assertExecutable, evaluate, GuardError, type CandidateMessage } from "./safety/policy.js";
+import {
+  assertExecutable,
+  evaluate,
+  GuardError,
+  type CandidateMessage,
+  type GuardContext,
+} from "./safety/policy.js";
 
 let failures = 0;
 let checks = 0;
@@ -1406,7 +1414,7 @@ section("19. SEO: canonical, sitemap and robots stay in agreement");
  */
 {
   const PUBLIC_PAGES = [
-    "index.html", "pricing.html", "privacy.html", "terms.html",
+    "index.html", "try.html", "pricing.html", "privacy.html", "terms.html",
     // Clean URLs: /blog/ and /blog/<slug>/ are directories served by their
     // index.html. Article URLs carry no extension on purpose — a slug that
     // never has to change is worth more than a file name, because a URL that
@@ -1657,6 +1665,130 @@ section("20. OAuth verification: the app name, and where the scopes are disclose
 
   check("The privacy policy cites the Google API Services User Data Policy",
     privacy.includes("developers.google.com/terms/api-services-user-data-policy"));
+}
+
+// ── 22. The public sandbox ───────────────────────────────────────────────
+
+section("22. Public sandbox: the demo runs the real pipeline");
+
+{
+  /**
+   * /try.html is a trust argument, and a trust argument that quietly stops
+   * being true is worse than never making it. Two things have to hold: the
+   * page must run the real code, and letting a caller hand the guard layer its
+   * own state must not have opened a way around it.
+   */
+
+  // The security half. `evaluate` now accepts a caller-supplied context so a
+  // dry run can work over synthetic data — but `assertExecutable` is the only
+  // path to a real mailbox, and a context reaching it would be an "ignore this
+  // sender's protection" parameter on exactly the wrong function.
+  addSender("boarding@fly.example", { protected: 1, category: "travel", confidence: 0.9 });
+  addMessages("boarding@fly.example", 5);
+
+  const lie: GuardContext = {
+    senders: new Map([
+      ["boarding@fly.example", {
+        sender_key: "boarding@fly.example",
+        protected: 0, user_protected: 0, user_replied: 0,
+        category: "promotional", confidence: 0.99, message_count: 5,
+      }],
+    ]),
+    repliedThreadIds: new Set(),
+    messagesActionedToday: 0,
+    mailboxSize: 100_000,
+  };
+
+  const dryRun = evaluate({
+    accountId, action: "archive", senderKeys: ["boarding@fly.example"],
+    candidates: candidates("boarding@fly.example"), confirmed: true, context: lie,
+  });
+  check("A supplied context is honoured for a dry run", dryRun.allowed.length === 5);
+
+  const executed = assertExecutable({
+    accountId, action: "archive", senderKeys: ["boarding@fly.example"],
+    candidates: candidates("boarding@fly.example"), context: lie,
+  });
+  check(
+    "…but assertExecutable discards it and re-reads the database",
+    executed.allowed.length === 0 &&
+      executed.exclusions.some((e) => e.code === "PROTECTED_CATEGORY"),
+    `${executed.allowed.length} allowed`,
+  );
+
+  db.prepare(`DELETE FROM messages_meta WHERE account_id = ? AND sender_key = ?`)
+    .run(accountId, "boarding@fly.example");
+  db.prepare(`DELETE FROM senders WHERE account_id = ? AND sender_key = ?`)
+    .run(accountId, "boarding@fly.example");
+
+  // The demo half. Selecting the entire catalogue must never move a message
+  // the product promises to protect — this is the claim the page makes on
+  // screen, asserted here so it cannot quietly stop being true.
+  const full = runSandbox(SANDBOX_INBOX, "trash", true);
+  const moved = new Set(full.outcome.moving.map((m) => m.id));
+
+  for (const id of ["united-1", "chase-1", "google-1", "amazon-1", "priya-1", "priya-2"]) {
+    check(`Sandbox holds ${id}`, !moved.has(id));
+  }
+  check("Sandbox holds the starred message", !moved.has("myntra-2"));
+  check("Sandbox holds the message inside the recency window", !moved.has("groupon-3"));
+  check("Sandbox holds the message carrying an attachment", !moved.has("oldstartup-1"));
+  check("Sandbox still cleans the actual clutter", moved.size > 0, `${moved.size} moved`);
+
+  // Every held message must name the guard that held it. A hold with no
+  // attribution is the page showing "trust me" in a different font.
+  check(
+    "Every held message names at least one guard",
+    full.outcome.held.length > 0 && full.outcome.held.every((h) => h.by.length > 0),
+  );
+
+  // The demo's own button for permanent deletion, which must fail closed.
+  const refused = runSandbox(SANDBOX_INBOX, "delete", true);
+  check(
+    "Sandbox refuses a permanent delete and moves nothing",
+    refused.outcome.moving.length === 0 &&
+      refused.guards.some((g) => g.code === "NEVER_DELETE" && g.fired),
+  );
+
+  /**
+   * A guard the roster does not know about renders with a blank id and no
+   * title, so adding a guard without listing it here silently degrades the
+   * page rather than breaking it. This is the check that makes that loud.
+   */
+  const policySrc = sources.find((s) => s.file.endsWith(path.join("safety", "policy.ts")))!;
+  const emittedCodes = [...policySrc.text.matchAll(/code:\s*"([A-Z_]+)"/g)].map((m) => m[1]!);
+  const unlisted = [...new Set(emittedCodes)].filter((c) => !(c in GUARDS));
+  check("Every guard code policy.ts can emit is on the sandbox roster",
+    unlisted.length === 0, unlisted.join(", "));
+
+  // The sandbox must import the real modules, not carry a second copy of the
+  // rules that is free to drift into something more flattering.
+  const sandboxSrc = sources.find((s) => s.file.endsWith(path.join("sandbox", "run.ts")))!;
+  check("Sandbox imports the real guard layer",
+    /from\s+"\.\.\/safety\/policy\.js"/.test(sandboxSrc.text) &&
+      /\bevaluate\s*\(/.test(sandboxSrc.text));
+  check("Sandbox imports the real classifier",
+    /from\s+"\.\.\/classify\/heuristics\.js"/.test(sandboxSrc.text) &&
+      /\bclassifyHeuristically\s*\(/.test(sandboxSrc.text));
+  check("Sandbox hashes subjects with the real function",
+    /from\s+"\.\.\/lib\/crypto\.js"/.test(sandboxSrc.text) &&
+      /\bhashSubject\s*\(/.test(sandboxSrc.text));
+  check("Sandbox never reaches Gmail",
+    !/googleapis|gmailClient|batchModify/.test(sandboxSrc.text));
+  // Matched on the database handle rather than on SQL keywords: the guard
+  // roster contains the string "Never permanently delete", and a keyword scan
+  // flags the page's own promise as a violation of it.
+  check("Sandbox never touches the database",
+    !/from\s+"\.\.\/db\.js"/.test(sandboxSrc.text) && !/\.prepare\s*\(/.test(sandboxSrc.text));
+
+  // Unauthenticated endpoint: the fixed catalogue IS the rate limit, so
+  // resolve() has to stay closed to anything not already in it.
+  check("Catalogue resolve ignores unknown ids", resolveSandbox(["nope", "groupon-1"]).length === 1);
+  check("Catalogue resolve collapses duplicates",
+    resolveSandbox(["groupon-1", "groupon-1"]).length === 1);
+  check("Catalogue resolve rejects a non-array body", resolveSandbox("groupon-1").length === 0);
+  check("Catalogue resolve is bounded by the catalogue",
+    resolveSandbox(new Array(5000).fill("groupon-1")).length === 1);
 }
 
 // ── Done ─────────────────────────────────────────────────────────────────

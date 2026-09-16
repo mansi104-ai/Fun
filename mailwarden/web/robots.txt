@@ -1,6 +1,6 @@
 # Mailwarden
 #
-# The four marketing pages are crawlable. Everything behind sign-in is not:
+# The marketing pages are crawlable. Everything behind sign-in is not:
 # /app and /api return either a redirect or a 401 to a crawler, so indexing
 # them wastes crawl budget and can surface a login wall as a search result for
 # the product's own name.
@@ -12,10 +12,15 @@
 
 User-agent: *
 Allow: /$
+Allow: /try.html
 Allow: /pricing.html
 Allow: /privacy.html
 Allow: /terms.html
 Allow: /blog/
+# /try.html renders its inbox from this one endpoint. It is public, static and
+# cacheable, and a crawler that cannot fetch it sees an empty page where the
+# demo should be. Longest-match wins, so this survives the /api/ rule below.
+Allow: /api/demo/inbox
 Disallow: /app
 Disallow: /api/
 Disallow: /auth/

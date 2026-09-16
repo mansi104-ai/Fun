@@ -47,7 +47,15 @@ The consent gate. Sticky footer expands to a full summary:
 > Nothing is permanently deleted. Everything is restorable for 30 days.
 > `[ Review list ]` `[ Confirm ]`
 
-Then a live progress bar, then a receipt with a persistent **Undo everything** button. The receipt is the shareable moment — make it screenshot-worthy, because that screenshot is free marketing.
+Then a live progress bar, then the result — reported **in place**, as a thin bar
+above the list, carrying the numbers and an **Undo** button on the right. It is
+deliberately not a page: a full-screen receipt turns clearing five senders into
+five round trips back through the overview, because the only way onward from it
+is a button that leaves the list. The durable record is the History tab, which
+can undo any run later.
+
+The shareable receipt described in `02-business-strategy.md` therefore has no
+screen of its own yet; History is where the numbers live.
 
 ## 3. Non-Negotiable Interaction Rules
 

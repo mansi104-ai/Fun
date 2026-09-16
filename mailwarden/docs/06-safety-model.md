@@ -153,6 +153,38 @@ Not just a compliance posture — it bounds the blast radius of any breach.
 - What reaches a third-party model is aggregate, content-free sender statistics
   only — never a subject, body, or address.
 
+## 6a. The guards are a pure function, and the public sandbox proves it
+
+`evaluate()` used to read the database from inside each guard. It now takes a
+`GuardContext` — the sender rows, the replied-thread ids, the rolling 24h
+count, and the mailbox size — which `loadGuardContext()` assembles at the edge.
+The rules did not change; only their data source moved.
+
+Two things follow.
+
+**The rule set became testable without a mailbox.** A guard can be exercised
+against any state, including states that are awkward to construct in SQLite.
+
+**The safety model became demonstrable.** `/try.html` is a public, no-sign-in
+page where a visitor drops mail into a test inbox and watches this exact
+function decide. It imports `classifyHeuristically`, `hashSubject` and
+`evaluate` directly — there is no second copy of the rules for the demo to
+flatter — and prints the full guard roster, including the guards that checked
+and found nothing. Most cleanup tools assert that they are careful. This shows
+the mechanism and lets a stranger try to break it.
+
+**The security consequence, handled explicitly.** A caller-supplied context on
+the function that governs real mail would be an "ignore this sender's
+protection" parameter. So `assertExecutable` — the only path to Gmail —
+**discards** any context it is handed and reloads from the database, for the
+same reason it re-derives everything else (§4). `evaluate` honours a supplied
+context; `assertExecutable` never does. Asserted in smoke §22.
+
+The sandbox is safe to expose because of what it cannot do: no session, no
+database write, no Gmail client in scope, no model call, and a server-side
+catalogue the client can only select from by id — so the work per request is
+bounded at roughly fifteen messages of in-memory computation.
+
 ## 7. Failure posture
 
 | Failure | Behaviour |
@@ -169,7 +201,7 @@ Every one of these resolves toward *doing less*, never toward doing more.
 
 ## 8. Test coverage
 
-`pnpm exec tsx src/smoke.ts` — 48 checks, no network or API keys required:
+`pnpm exec tsx src/smoke.ts` — 364 checks, no network or API keys required:
 
 - Protective heuristics (OTP, airline-in-Promotions, bank, receipt, replied-to)
 - Every guard above, in both the triggering and non-triggering direction
@@ -179,5 +211,10 @@ Every one of these resolves toward *doing less*, never toward doing more.
 - Entitlement gating
 - Source scan for `messages.delete`, `batchDelete`, `mail.google.com`,
   `gmail.readonly`, and for any second caller of `batchModify`
+- The sandbox (§22): that it imports the real classifier and the real guard
+  layer rather than reimplementing them, that every guard code `policy.ts` can
+  emit appears on the page's roster, that selecting the whole test inbox never
+  moves a protected message, and that `assertExecutable` ignores a supplied
+  context
 
 Run it before every commit that touches `classify/`, `safety/`, or `gmail/`.

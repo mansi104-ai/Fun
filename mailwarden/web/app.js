@@ -47,7 +47,7 @@ const mb = (b) => !b ? "0 MB"
 const day = (ts) => ts ? new Date(ts).toLocaleDateString(undefined,
   { day: "numeric", month: "short" }) : "—";
 
-const SECTIONS = ["scan", "overview", "list", "review", "protectedView", "history", "receipt"];
+const SECTIONS = ["scan", "overview", "list", "review", "protectedView", "history"];
 const show = (id) => {
   for (const s of SECTIONS) $(s).classList.add("hidden");
   $(id).classList.remove("hidden");
@@ -60,7 +60,6 @@ let isDemo = false;
 let tab = "overview";
 let reviewQueue = [];
 let reviewIndex = 0;
-let lastBatchId = null;
 let readerSender = null;
 
 // ── Navigation ───────────────────────────────────────────────────────
@@ -92,6 +91,7 @@ function renderTabs() {
 
 async function goTab(next) {
   tab = next;
+  clearFlash();
   renderTabs();
   if (next === "overview") return renderOverview();
   if (next === "clean") return guarded(renderList)("safe");
@@ -503,8 +503,9 @@ async function renderList(state) {
     ${actionable.map((s) => senderCard(s, state)).join("")}`;
 
   $("startReview").onclick = () => startReview(actionable, state);
-  wireSenderCards($("list"));
-  wireSelection(() => renderList(state));
+  const reload = () => renderList(state);
+  wireSenderCards($("list"), reload);
+  wireSelection(reload);
 }
 
 function senderCard(s, state) {
@@ -547,12 +548,17 @@ function senderCard(s, state) {
   </article>`;
 }
 
-function wireSenderCards(root) {
+/**
+ * `reload` is what redraws the list once an action has run. Without it a single
+ * sender action would leave the page showing mail that is no longer there, and
+ * the only way back to a truthful list was to leave the tab and return.
+ */
+function wireSenderCards(root, reload) {
   for (const el of root.querySelectorAll("[data-act]")) {
     el.onclick = () => {
       const { act, key } = el.dataset;
-      if (act === "archive") return runSenders([key], "archive");
-      if (act === "trash") return runSenders([key], "trash");
+      if (act === "archive") return runSenders([key], "archive", reload);
+      if (act === "trash") return runSenders([key], "trash", reload);
       if (act === "read") return openReader(key);
       if (act === "clean") return setPlacement(el, [key], "clean");
       if (act === "protect") return protectSender(el, key);
@@ -826,7 +832,7 @@ async function renderUnsub() {
           <button data-act="read" data-key="${esc(s.senderKey)}">Read</button>
         </div>
       </article>`).join("")}`;
-  wireSenderCards($("list"));
+  wireSenderCards($("list"), () => renderUnsub());
 }
 
 // ── Settings ─────────────────────────────────────────────────────────
@@ -888,6 +894,53 @@ async function renderSettings() {
     </div>`;
 }
 
+// ── Result bar ───────────────────────────────────────────────────────
+//
+// A cleanup used to end on a full-page receipt, which meant that clearing five
+// senders cost five round trips back through the overview. The outcome now
+// stays where the work is: the list re-renders with whatever is left, and the
+// result sits in a thin bar above it with Undo on the right — as easy to
+// ignore as it is to use. The durable record is still the History tab, which
+// can undo any run long after this bar is gone.
+
+/**
+ * @param {{messageCount:number, action:string, bytesFreed:number}} done
+ * @param {string} batchId  the run this bar can reverse
+ */
+function flashResult(done, batchId) {
+  const el = $("flash");
+  el.innerHTML = `
+    <span class="grow">
+      <strong>${fmt.format(done.messageCount)} ${done.action === "trash" ? "deleted" : "archived"}</strong>
+      · ${mb(done.bytesFreed)} freed · 0 protected touched
+      <span class="flash-note">${done.action === "trash"
+        ? "In Gmail's Trash for 30 days."
+        : "Still in All Mail and searchable."}</span>
+    </span>
+    <button id="flashUndo">Undo</button>
+    <button class="close" id="flashClose" aria-label="Dismiss">✕</button>`;
+  el.classList.remove("hidden");
+
+  $("flashClose").onclick = clearFlash;
+  $("flashUndo").onclick = () => undo(batchId, $("flashUndo"), async (msg) => {
+    // The list behind the bar is now wrong — the restored mail belongs back in
+    // it — so the tab is re-rendered underneath before the outcome is reported.
+    const el2 = $("flash");
+    await goTab(tab);
+    el2.innerHTML = `<span class="grow">${esc(msg)}</span>
+      <button class="close" id="flashClose" aria-label="Dismiss">✕</button>`;
+    el2.classList.remove("hidden");
+    $("flashClose").onclick = clearFlash;
+  });
+}
+
+function clearFlash() {
+  const el = $("flash");
+  if (!el) return;
+  el.classList.add("hidden");
+  el.innerHTML = "";
+}
+
 // ── Actions ──────────────────────────────────────────────────────────
 
 async function runSenders(senderKeys, action, after) {
@@ -947,8 +1000,9 @@ async function confirmAndRun(plan, replan, after) {
 
     ${isDemo ? `<div class="note warn">Demo inbox: this stops before the Gmail call.</div>` : ""}
     <p class="hint">${plan.action === "trash"
-      ? "You can restore it from Gmail's Trash, or undo the whole run below."
-      : "Archived mail stays in All Mail and stays searchable."} You get an Undo button next.</p>`;
+      ? "You can restore it from Gmail's Trash, or undo the whole run."
+      : "Archived mail stays in All Mail and stays searchable."} An Undo button
+      appears above the list afterwards, and History can reverse the run later.</p>`;
 
   const runnable = blocking.length === 0 && plan.messageCount > 0;
   $("reallyConfirm").disabled = !runnable;
@@ -962,12 +1016,12 @@ async function confirmAndRun(plan, replan, after) {
       const finalPlan = await replan();
       if (!finalPlan.batchId) throw new Error(finalPlan.violations?.[0]?.message ?? "Blocked.");
       const done = await api(`/api/batches/${finalPlan.batchId}/execute`, { method: "POST" });
-      lastBatchId = finalPlan.batchId;
       $("confirmDialog").close();
       overview = await api("/api/overview");
       renderTabs();
-      if (after) after();
-      else showReceipt(done);
+      // Redraw first so the bar lands on top of the updated list, then report.
+      if (after) await after();
+      flashResult(done, finalPlan.batchId);
     } catch (err) {
       $("confirmDialog").close();
       if (err.status === 402) upgradePrompt(err.data.message);
@@ -981,51 +1035,25 @@ async function confirmAndRun(plan, replan, after) {
 
 $("cancelConfirm").onclick = () => $("confirmDialog").close();
 
-function showReceipt(done) {
-  show("receipt");
-  $("receipt").innerHTML = `
-    <h1>Cleanup complete</h1>
-    <p class="lede">
-      ${fmt.format(done.messageCount)} emails
-      ${done.action === "trash" ? "deleted" : "archived"} ·
-      ${mb(done.bytesFreed)} freed.
-    </p>
-    <div class="note safe">
-      <strong>0 protected emails were touched.</strong>
-      ${done.action === "trash"
-        ? "Deleted mail sits in Gmail's Trash for 30 days — restore it there, or undo the whole run."
-        : "Archived mail is still in All Mail and fully searchable. Nothing was deleted."}
-    </div>
-    <div class="row" style="margin-top:18px">
-      <button class="primary big" id="rcDone">Back to overview</button>
-      <button class="big" id="rcUndo">Undo this cleanup</button>
-    </div>
-    <p class="hint" id="rcNote" style="margin-top:12px"></p>`;
-
-  $("rcDone").onclick = () => goTab("overview");
-  $("rcUndo").onclick = () => undo(lastBatchId, $("rcUndo"));
-}
-
 /**
  * Undo reports what the server VERIFIED, not what it attempted. The server
  * reads Gmail back after restoring, so `restored` means confirmed-in-place.
  */
-async function undo(batchId, button) {
+async function undo(batchId, button, onResult) {
   if (!batchId) return;
   button.disabled = true;
   button.textContent = "Undoing…";
   try {
     const r = await api(`/api/batches/${batchId}/undo`, { method: "POST" });
-    const note = $("rcNote");
     const parts = [`Restored ${fmt.format(r.restored)} emails.`];
     if (r.mismatched) parts.push(`${fmt.format(r.mismatched)} did not match and were left alone.`);
     if (r.missing) parts.push(`${fmt.format(r.missing)} are no longer in Gmail.`);
     if (!r.verified) parts.push("We could not verify the result against Gmail.");
     const msg = parts.join(" ");
-    if (note) note.textContent = msg; else alert(msg);
     button.textContent = "Undone";
     overview = await api("/api/overview");
     renderTabs();
+    if (onResult) await onResult(msg); else alert(msg);
   } catch (err) {
     button.disabled = false;
     button.textContent = "Undo";

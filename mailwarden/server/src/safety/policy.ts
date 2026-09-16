@@ -55,7 +55,7 @@ export interface GuardVerdict {
   ok: boolean;
 }
 
-interface SenderRow {
+export interface SenderRow {
   sender_key: string;
   protected: number;
   user_protected: number;
@@ -65,6 +65,29 @@ interface SenderRow {
   message_count: number;
 }
 
+/**
+ * Every piece of stored state the guards read, gathered in one place.
+ *
+ * The guards used to query the database individually, which made them
+ * untestable without an account and unrunnable outside a real mailbox. Pulling
+ * the reads out to the edge makes the rule set a pure function of
+ * (input, context) — the logic below is unchanged, only its data source moved.
+ *
+ * That purity is what lets the public sandbox at /try.html run the *real*
+ * guards over a made-up inbox: a visitor sees the same code that governs their
+ * mail, not a re-implementation of it that could drift. See sandbox/run.ts.
+ */
+export interface GuardContext {
+  /** The sender rows for every key in the batch. A missing key fails closed. */
+  senders: Map<string, SenderRow>;
+  /** Threads carrying at least one SENT message — i.e. the user wrote in them. */
+  repliedThreadIds: Set<string>;
+  /** Messages already actioned in the rolling 24h window, for the daily ceiling. */
+  messagesActionedToday: number;
+  /** Total messages known for this account — the denominator for the scale check. */
+  mailboxSize: number;
+}
+
 export interface GuardInput {
   accountId: string;
   action: string;
@@ -72,6 +95,14 @@ export interface GuardInput {
   candidates: CandidateMessage[];
   /** Set when the user has explicitly confirmed a `confirm`-severity warning. */
   confirmed?: boolean;
+  /**
+   * Supplies stored state directly instead of reading the database.
+   *
+   * For dry runs over synthetic data only. `assertExecutable` ignores it and
+   * always re-reads from the database, so this can never widen what a real
+   * mailbox allows — see the note there.
+   */
+  context?: GuardContext;
 }
 
 // ── Individual guards ────────────────────────────────────────────────────
@@ -210,7 +241,7 @@ function guardRecency(candidates: CandidateMessage[], exclusions: Exclusion[]): 
  * unrecoverable deletion by Gmail itself.
  */
 function guardMessageLevel(
-  accountId: string,
+  repliedThreads: ReadonlySet<string>,
   action: string,
   candidates: CandidateMessage[],
   exclusions: Exclusion[],
@@ -226,23 +257,11 @@ function guardMessageLevel(
     tally.set(key, row);
   };
 
-  /**
-   * Threads the user has written in. Sender-level reply detection is a ratio
-   * (see sync.ts), which correctly refuses to lock a whole newsletter over one
-   * stray reply — but the thread you actually replied in should still never be
-   * touched. This closes that gap without reopening the other one.
-   */
-  const repliedThreads = new Set(
-    (
-      db
-        .prepare(
-          `SELECT DISTINCT thread_id FROM messages_meta
-           WHERE account_id = ? AND thread_id IS NOT NULL AND labels LIKE '%SENT%'`,
-        )
-        .all(accountId) as { thread_id: string }[]
-    ).map((r) => r.thread_id),
-  );
-
+  // `repliedThreads` is supplied by the context. Sender-level reply detection
+  // is a ratio (see sync.ts), which correctly refuses to lock a whole
+  // newsletter over one stray reply — but the thread you actually replied in
+  // should still never be touched. G10 closes that gap without reopening the
+  // other one.
   for (const c of candidates) {
     const labels = c.labels.split(",");
 
@@ -287,7 +306,12 @@ function guardMessageLevel(
 }
 
 /** G5 — volume ceilings, per batch and per rolling day. */
-function guardVelocity(accountId: string, allowed: number, senderCount: number, violations: Violation[]): void {
+function guardVelocity(
+  actionedToday: number,
+  allowed: number,
+  senderCount: number,
+  violations: Violation[],
+): void {
   if (allowed > LIMITS.maxMessagesPerBatch) {
     violations.push({
       code: "BATCH_TOO_LARGE",
@@ -303,41 +327,30 @@ function guardVelocity(accountId: string, allowed: number, senderCount: number, 
     });
   }
 
-  const since = Date.now() - DAY_MS;
-  const row = db
-    .prepare(
-      `SELECT COALESCE(SUM(message_count), 0) AS total FROM batches
-       WHERE account_id = ? AND created_at > ? AND status IN ('running','done')`,
-    )
-    .get(accountId, since) as { total: number };
-
-  if (row.total + allowed > LIMITS.maxMessagesPerDay) {
+  if (actionedToday + allowed > LIMITS.maxMessagesPerDay) {
     violations.push({
       code: "DAILY_LIMIT",
       severity: "block",
-      message: `This would put you over the ${LIMITS.maxMessagesPerDay.toLocaleString()} messages/day safety limit (${row.total.toLocaleString()} already actioned today).`,
+      message: `This would put you over the ${LIMITS.maxMessagesPerDay.toLocaleString()} messages/day safety limit (${actionedToday.toLocaleString()} already actioned today).`,
     });
   }
 }
 
 /** G6 — a batch spanning most of the mailbox gets a second look, not a refusal. */
 function guardScaleAnomaly(
-  accountId: string,
+  mailboxSize: number,
   allowed: number,
   confirmed: boolean,
   violations: Violation[],
 ): void {
-  const row = db
-    .prepare(`SELECT COUNT(*) AS total FROM messages_meta WHERE account_id = ?`)
-    .get(accountId) as { total: number };
-  if (row.total === 0) return;
+  if (mailboxSize === 0) return;
 
-  const ratio = allowed / row.total;
+  const ratio = allowed / mailboxSize;
   if (ratio >= LIMITS.scaleAnomalyRatio && !confirmed) {
     violations.push({
       code: "SCALE_ANOMALY",
       severity: "confirm",
-      message: `This affects ${Math.round(ratio * 100)}% of your mailbox (${allowed.toLocaleString()} of ${row.total.toLocaleString()} messages). Confirm you meant to do this — it is reversible for 30 days either way.`,
+      message: `This affects ${Math.round(ratio * 100)}% of your mailbox (${allowed.toLocaleString()} of ${mailboxSize.toLocaleString()} messages). Confirm you meant to do this — it is reversible for 30 days either way.`,
     });
   }
 }
@@ -356,6 +369,38 @@ function loadSenders(accountId: string, senderKeys: string[]): Map<string, Sende
   return new Map(rows.map((r) => [r.sender_key, r]));
 }
 
+/** Reads every piece of stored state the guards depend on, for one batch. */
+export function loadGuardContext(accountId: string, senderKeys: string[]): GuardContext {
+  const repliedThreadIds = new Set(
+    (
+      db
+        .prepare(
+          `SELECT DISTINCT thread_id FROM messages_meta
+           WHERE account_id = ? AND thread_id IS NOT NULL AND labels LIKE '%SENT%'`,
+        )
+        .all(accountId) as { thread_id: string }[]
+    ).map((r) => r.thread_id),
+  );
+
+  const actioned = db
+    .prepare(
+      `SELECT COALESCE(SUM(message_count), 0) AS total FROM batches
+       WHERE account_id = ? AND created_at > ? AND status IN ('running','done')`,
+    )
+    .get(accountId, Date.now() - DAY_MS) as { total: number };
+
+  const mailbox = db
+    .prepare(`SELECT COUNT(*) AS total FROM messages_meta WHERE account_id = ?`)
+    .get(accountId) as { total: number };
+
+  return {
+    senders: loadSenders(accountId, senderKeys),
+    repliedThreadIds,
+    messagesActionedToday: actioned.total,
+    mailboxSize: mailbox.total,
+  };
+}
+
 /**
  * Runs the full policy. Pure with respect to the mailbox — it reads state and
  * returns a verdict, never mutates anything.
@@ -366,7 +411,8 @@ export function evaluate(input: GuardInput): GuardVerdict {
 
   guardAction(input.action, violations);
 
-  const senders = loadSenders(input.accountId, input.senderKeys);
+  const ctx = input.context ?? loadGuardContext(input.accountId, input.senderKeys);
+  const senders = ctx.senders;
 
   // A requested sender that no longer exists is a stale client. Fail closed.
   const missing = input.senderKeys.filter((k) => !senders.has(k));
@@ -385,7 +431,7 @@ export function evaluate(input: GuardInput): GuardVerdict {
   ]);
   const excludedMessages = new Set<string>([
     ...guardRecency(input.candidates, exclusions),
-    ...guardMessageLevel(input.accountId, input.action, input.candidates, exclusions),
+    ...guardMessageLevel(ctx.repliedThreadIds, input.action, input.candidates, exclusions),
   ]);
 
   const allowed = input.candidates.filter(
@@ -393,8 +439,8 @@ export function evaluate(input: GuardInput): GuardVerdict {
   );
   const allowedSenders = new Set(allowed.map((c) => c.sender_key));
 
-  guardVelocity(input.accountId, allowed.length, allowedSenders.size, violations);
-  guardScaleAnomaly(input.accountId, allowed.length, input.confirmed === true, violations);
+  guardVelocity(ctx.messagesActionedToday, allowed.length, allowedSenders.size, violations);
+  guardScaleAnomaly(ctx.mailboxSize, allowed.length, input.confirmed === true, violations);
 
   const blocking = violations.filter((v) => v.severity === "block");
   const confirming = violations.filter((v) => v.severity === "confirm");
@@ -425,9 +471,19 @@ export class GuardError extends Error {
  * sender can be reclassified, pinned, or replied to between planning and
  * execution, and acting on a stale verdict is exactly the bug that loses
  * someone's boarding pass.
+ *
+ * For the same reason it DISCARDS any `context` the caller passed and reloads
+ * from the database. A caller-supplied context is a dry-run convenience; if it
+ * could reach this function it would be an "act as if this sender were not
+ * protected" parameter on the only code path that touches real mail. Tested in
+ * smoke §22.
  */
 export function assertExecutable(input: GuardInput): GuardVerdict {
-  const verdict = evaluate({ ...input, confirmed: true });
+  const verdict = evaluate({
+    ...input,
+    context: loadGuardContext(input.accountId, input.senderKeys),
+    confirmed: true,
+  });
   const blocking = verdict.violations.filter((v) => v.severity === "block");
   if (blocking.length > 0) {
     throw new GuardError(blocking.map((v) => v.message).join(" "), blocking);

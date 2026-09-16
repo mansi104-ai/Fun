@@ -130,6 +130,24 @@
   .selbar button { min-height:38px; padding:7px 13px; }
   .selbar[hidden] { display:none; }
 
+  /* ── Result bar ───────────────────────────────────────────────────
+     Deliberately thin. It reports a finished action and offers to reverse it;
+     it is not a page, and it must not push the list it describes off screen. */
+  .flash {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    background:var(--safe-bg); color:var(--safe-ink);
+    border-radius:var(--radius-sm); padding:9px 10px 9px 14px; margin:0 0 16px;
+    font-size:.88rem; font-weight:540;
+  }
+  .flash .grow { flex:1 1 220px; min-width:0; }
+  .flash .flash-note { color:inherit; opacity:.72; font-weight:450; }
+  .flash button {
+    background:transparent; color:inherit; border-color:currentColor;
+    min-height:36px; padding:6px 14px; font-size:.85rem; font-weight:600;
+  }
+  .flash button:hover:not(:disabled) { background:rgb(0 0 0 / .07); }
+  .flash button.close { border-color:transparent; padding:6px 10px; font-weight:400; }
+
   /* ── Focused review ───────────────────────────────────────────────── */
   .review-progress { font-size:.85rem; color:var(--muted); margin-bottom:10px;
                      display:flex; justify-content:space-between; gap:10px; }
@@ -221,6 +239,10 @@
 
   <nav class="tabs hidden" id="tabs" aria-label="Sections"></nav>
 
+  <!-- The outcome of the last cleanup. Sits outside the sections so a list can
+       redraw underneath it without taking the Undo button away with it. -->
+  <div id="flash" class="flash hidden" role="status" aria-live="polite"></div>
+
   <section id="scan" class="hidden">
     <h1>Let's look at your inbox</h1>
     <p class="lede">
@@ -239,7 +261,6 @@
   <section id="review" class="hidden"></section>
   <section id="protectedView" class="hidden"></section>
   <section id="history" class="hidden"></section>
-  <section id="receipt" class="hidden"></section>
 </div>
 
 <dialog id="confirmDialog" aria-labelledby="confirmTitle">

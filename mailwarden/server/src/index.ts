@@ -10,6 +10,7 @@ import { analyticsRoutes } from "./routes/analytics.js";
 import { apiRoutes } from "./routes/api.js";
 import { billingRoutes } from "./routes/billing.js";
 import { demoRoutes } from "./routes/demo.js";
+import { sandboxRoutes } from "./routes/sandbox.js";
 import { pruneWebEvents } from "./analytics.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -98,6 +99,7 @@ app.get("/healthz", async () => ({ ok: true }));
 
 await app.register(authRoutes);
 await app.register(demoRoutes);
+await app.register(sandboxRoutes);
 await app.register(apiRoutes);
 await app.register(billingRoutes);
 await app.register(analyticsRoutes);
