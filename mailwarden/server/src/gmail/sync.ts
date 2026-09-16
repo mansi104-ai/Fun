@@ -25,8 +25,15 @@ export interface SyncProgress {
 const progress = new Map<string, SyncProgress>();
 export const syncProgress = (accountId: string): SyncProgress | undefined => progress.get(accountId);
 
-/** Headers we request. Anything not listed here never reaches our process. */
-const HEADERS = ["From", "Subject", "List-Unsubscribe", "Precedence"];
+/**
+ * The complete header allowlist. Anything not listed here never reaches our
+ * process. Paired with `format: "metadata"` this is the
+ * narrowest read the Gmail API offers — no body, no recipients, nothing else.
+ *
+ * Exported because /try.html shows it verbatim: a page that claims "we ask for
+ * four headers" while the code asks for six would be worse than saying nothing.
+ */
+export const HEADERS = ["From", "Subject", "List-Unsubscribe", "Precedence"];
 
 async function mapLimited<T, R>(
   items: T[],

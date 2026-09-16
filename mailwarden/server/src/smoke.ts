@@ -20,7 +20,7 @@ import { factsHash as factsHashForTest, isSuggestable } from "./classify/index.j
 import { CATEGORIES } from "./classify/taxonomy.js";
 import { db } from "./db.js";
 import { planBatch } from "./gmail/executor.js";
-import { aggregateSenders } from "./gmail/sync.js";
+import { aggregateSenders, HEADERS } from "./gmail/sync.js";
 import { isPubliclyRoutable, parseTargets } from "./gmail/unsubscribe.js";
 import { analyticsSummary, recordWebEvent } from "./analytics.js";
 import { newId } from "./lib/crypto.js";
@@ -1780,6 +1780,35 @@ section("22. Public sandbox: the demo runs the real pipeline");
   // flags the page's own promise as a violation of it.
   check("Sandbox never touches the database",
     !/from\s+"\.\.\/db\.js"/.test(sandboxSrc.text) && !/\.prepare\s*\(/.test(sandboxSrc.text));
+
+  /**
+   * THE REDACTION CLAIM, which /try.html invites visitors to verify themselves.
+   *
+   * The page shows each sample's body on the left and a black bar on the right,
+   * and tells the reader they can confirm it in their own network tab. That is
+   * only honest while the run response genuinely carries no prose — so the
+   * whole serialised trace is searched for every sample body. A future field
+   * that echoes one back (a "preview", a debug dump) fails here rather than
+   * quietly turning the page into a lie.
+   */
+  check("Every sample carries a body to withhold",
+    SANDBOX_INBOX.every((m) => typeof m.body === "string" && m.body.length > 40));
+
+  const serialised = JSON.stringify(full);
+  const leaked = SANDBOX_INBOX.filter((m) => serialised.includes(m.body.slice(0, 40)));
+  check("No sample body appears anywhere in the run response",
+    leaked.length === 0, leaked.map((m) => m.id).join(", "));
+  check("…nor does the response carry a body field at all",
+    !/"body"\s*:/.test(serialised));
+
+  // The page prints the allowlist as fact. It has to be the real one.
+  check("The trace reports sync.ts's actual header allowlist",
+    full.redaction.headersRequested.join(",") === HEADERS.join(","),
+    full.redaction.headersRequested.join(","));
+  check("The trace reports the metadata-only fetch format",
+    full.redaction.fetchFormat === "metadata");
+  check("A body cannot be requested by the allowlist",
+    !HEADERS.some((h) => /body|content|snippet/i.test(h)));
 
   // Unauthenticated endpoint: the fixed catalogue IS the rate limit, so
   // resolve() has to stay closed to anything not already in it.

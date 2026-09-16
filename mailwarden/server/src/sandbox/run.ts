@@ -1,5 +1,5 @@
 import { hashSubject } from "../lib/crypto.js";
-import { REPLY_RATIO_THRESHOLD, UNREPLIABLE } from "../gmail/sync.js";
+import { HEADERS, REPLY_RATIO_THRESHOLD, UNREPLIABLE } from "../gmail/sync.js";
 import {
   classifyHeuristically,
   fallbackClassify,
@@ -279,11 +279,30 @@ export interface HeldMessage {
   by: { id: string; code: string; reason: string }[];
 }
 
+/**
+ * What the Gmail read is allowed to see, sent so the page can show the real
+ * allowlist rather than a hand-copied one that is free to go stale.
+ *
+ * Note what is NOT in `SandboxTrace`: any message body. The catalogue endpoint
+ * serves bodies so the sample cards can display them, and this response — the
+ * one that represents a sync — never carries one. That asymmetry is checkable
+ * from a visitor's own network tab, which is the point of shipping it.
+ */
+export interface RedactionFacts {
+  /** The exact header allowlist sync.ts passes to Gmail. */
+  headersRequested: string[];
+  /** The Gmail `format` parameter. "metadata" cannot return a body. */
+  fetchFormat: string;
+  /** Header values read, used, and then dropped rather than stored. */
+  discarded: string[];
+}
+
 export interface SandboxTrace {
   action: string;
   confirmed: boolean;
   now: number;
   limits: typeof LIMITS;
+  redaction: RedactionFacts;
   ingest: {
     rows: IngestedRow[];
     /** Messages actually eligible for this action, after the state filter. */
@@ -439,6 +458,11 @@ export function runSandbox(
     confirmed,
     now,
     limits: LIMITS,
+    redaction: {
+      headersRequested: [...HEADERS],
+      fetchFormat: "metadata",
+      discarded: ["Subject"],
+    },
     ingest: { rows, candidateCount: candidates.length, mailboxSize },
     senders,
     guards,
