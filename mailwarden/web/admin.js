@@ -49,6 +49,7 @@ async function boot() {
   }
   $("panel").hidden = false;
   await loadUsers();
+  await loadConnections();
   await loadAnalytics(7);
   await loadRequests();
 }
@@ -131,6 +132,37 @@ async function loadUsers() {
   } catch (err) {
     $("users").innerHTML = `<tr><td colspan="7" class="err">${esc(err.message)}</td></tr>`;
     $("userSummary").textContent = "";
+  }
+}
+
+// ── Connected Gmail ──────────────────────────────────────────────────
+
+async function loadConnections() {
+  try {
+    const { connections } = await api("/api/admin/connections");
+    const body = $("connections");
+
+    if (connections.length === 0) {
+      body.innerHTML = `<tr><td colspan="6" class="muted">No Gmail has been connected yet.</td></tr>`;
+      $("connSummary").textContent = "No connections yet.";
+      return;
+    }
+
+    const now = connections.filter((c) => c.connected).length;
+    $("connSummary").innerHTML =
+      `<b>${now}</b> connected now · <b>${connections.length - now}</b> disconnected since connecting`;
+
+    body.innerHTML = connections.map((c) => `<tr>
+        <td>${esc(c.email)}</td>
+        <td><span class="pill ${c.connected ? "ok" : "wait"}">${c.connected ? "connected" : "disconnected"}</span></td>
+        <td class="muted">${esc(c.syncState ?? "—")}</td>
+        <td class="muted">${when(c.lastSyncAt)}</td>
+        <td class="muted">${when(c.lastConnectedAt)}</td>
+        <td class="muted">${when(c.disconnectedAt)}</td>
+      </tr>`).join("");
+  } catch (err) {
+    $("connections").innerHTML = `<tr><td colspan="6" class="err">${esc(err.message)}</td></tr>`;
+    $("connSummary").textContent = "";
   }
 }
 

@@ -1,0 +1,32 @@
+# Deploys Mailwarden to Fly (served at mailwarden.xyz) on every push that
+# touches it, so nobody has to run flyctl by hand.
+#
+# One-time setup:
+#   1. flyctl tokens create deploy --app mailwarden
+#   2. GitHub repo -> Settings -> Secrets and variables -> Actions
+#      -> New repository secret, name FLY_API_TOKEN, paste the token.
+name: Deploy Mailwarden
+
+on:
+  push:
+    branches: [mailwarden]
+    paths: ["mailwarden/**", ".github/workflows/mailwarden-deploy.yml"]
+  workflow_dispatch:
+
+# A second push while one deploy runs waits for it rather than racing it.
+concurrency:
+  group: mailwarden-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mailwarden
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only --app mailwarden
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

@@ -340,4 +340,102 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
       }),
     };
   });
+
+  /**
+   * Every Gmail inbox that has been connected, including ones that are gone.
+   *
+   * The users table alone cannot answer "someone connected and I can't see
+   * them": disconnecting purges the user row by cascade. The audit log has no
+   * foreign key, so it outlives the purge and still records who connected and
+   * when they left.
+   */
+  app.get("/api/admin/connections", async (req, reply) => {
+    const userId = currentUserId(req.cookies);
+    if (!userId) return reply.code(401).send({ error: "not_authenticated" });
+    const me = db.prepare(`SELECT email FROM users WHERE id = ?`).get(userId) as
+      | { email: string }
+      | undefined;
+    if (!isAdmin(me?.email)) return reply.code(403).send({ error: "forbidden" });
+
+    const events = db
+      .prepare(
+        `SELECT user_id, action, detail, created_at FROM audit_log
+          WHERE action IN ('account.connected', 'account.disconnected')
+          ORDER BY created_at ASC`,
+      )
+      .all() as { user_id: string; action: string; detail: string | null; created_at: number }[];
+
+    const live = db
+      .prepare(
+        `SELECT a.user_id, a.email, a.sync_state, a.last_sync_at, a.created_at
+           FROM accounts a
+          WHERE a.email NOT LIKE 'demo-%@mailwarden.local'`,
+      )
+      .all() as {
+      user_id: string;
+      email: string;
+      sync_state: string;
+      last_sync_at: number | null;
+      created_at: number;
+    }[];
+
+    type Row = {
+      email: string;
+      connected: boolean;
+      syncState: string | null;
+      lastSyncAt: number | null;
+      firstConnectedAt: number;
+      lastConnectedAt: number;
+      disconnectedAt: number | null;
+    };
+    const byKey = new Map<string, Row>();
+
+    // The disconnect event carries no email, so it is matched to the address
+    // its user_id last connected with.
+    const emailOf = new Map<string, string>();
+    for (const e of events) {
+      if (e.action === "account.connected") {
+        let email = "";
+        try {
+          email = String(JSON.parse(e.detail ?? "{}").email ?? "");
+        } catch {}
+        if (!email) continue;
+        emailOf.set(e.user_id, email);
+        const key = `${e.user_id}|${email}`;
+        const row = byKey.get(key);
+        if (row) {
+          row.lastConnectedAt = e.created_at;
+          row.disconnectedAt = null;
+        } else {
+          byKey.set(key, {
+            email, connected: false, syncState: null, lastSyncAt: null,
+            firstConnectedAt: e.created_at, lastConnectedAt: e.created_at, disconnectedAt: null,
+          });
+        }
+      } else {
+        const email = emailOf.get(e.user_id);
+        const row = email ? byKey.get(`${e.user_id}|${email}`) : undefined;
+        if (row) row.disconnectedAt = e.created_at;
+      }
+    }
+
+    // Live rows are the truth for what is connected now. They also cover any
+    // account connected before the audit event existed.
+    for (const a of live) {
+      const key = `${a.user_id}|${a.email}`;
+      const row = byKey.get(key) ?? {
+        email: a.email, connected: false, syncState: null, lastSyncAt: null,
+        firstConnectedAt: a.created_at, lastConnectedAt: a.created_at, disconnectedAt: null,
+      };
+      row.connected = true;
+      row.syncState = a.sync_state;
+      row.lastSyncAt = a.last_sync_at;
+      row.disconnectedAt = null;
+      byKey.set(key, row);
+    }
+
+    const connections = [...byKey.values()].sort((x, y) => y.lastConnectedAt - x.lastConnectedAt);
+    audit(userId, "admin.connections_listed", { count: connections.length });
+    return { connections };
+  });
 }
