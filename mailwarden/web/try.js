@@ -1,22 +1,14 @@
 /**
  * Mailwarden sandbox client — /try.html.
  *
- * Renders a sample library and a test inbox, posts the inbox's message ids to
- * /api/demo/run, and draws the trace the server sent back.
- *
- * The rule this file follows, and the reason the page is worth anything:
  * NOTHING HERE DECIDES ANYTHING. Every category, confidence, reason, guard
- * name, hold reason and bar length on screen comes from a value the server
- * produced by running the real classifier and the real guard layer. This file
- * knows how to lay out a result; it does not know what the result should be.
- * If it started inferring — colouring a row by guessing which sender "looks
- * protected", or drawing a bar from a number it made up — the page would become
- * an illustration of the safety model rather than an observation of it.
+ * name, hold reason and bar length comes from a value the server produced by
+ * running the real classifier and the real guard layer. This file lays out a
+ * result; it does not know what the result should be.
  *
  * Same CSP constraint as app.js: external file, never an inline <script>. The
- * charts are hand-built from CSS boxes for the same reason — `default-src
- * 'self'` blocks every charting library on every CDN, and a bar chart with
- * text labels is more legible in CSS than in a viewBox anyway.
+ * charts are CSS boxes for the same reason — `default-src 'self'` blocks every
+ * charting library on every CDN.
  */
 
 const api = async (url, opts = {}) => {
@@ -40,64 +32,44 @@ const kb = (b) => `${Math.max(1, Math.round(b / 1024))} KB`;
 const pct = (n) => `${Math.round(n * 100)}%`;
 const plural = (n, one, many) => (n === 1 ? one : many);
 
-/** "412 days ago" reads as evidence; a date the reader has to subtract does not. */
 const ago = (ts, now) => {
   const days = Math.max(0, Math.round((now - ts) / 86400000));
   if (days === 0) return "today";
   if (days === 1) return "yesterday";
-  if (days < 60) return `${days} days ago`;
-  if (days < 730) return `${Math.round(days / 30)} months ago`;
-  return `${(days / 365).toFixed(1)} years ago`;
+  if (days < 60) return `${days}d ago`;
+  if (days < 730) return `${Math.round(days / 30)}mo ago`;
+  return `${(days / 365).toFixed(1)}y ago`;
 };
 
 let LIBRARY = [];
 let LIMITS = { maxCustom: 10, maxTotal: 30, maxSubject: 300 };
 
-/** Catalogue picks, insertion-ordered so the inbox reads as it was built. */
 const inbox = new Set();
 
 /**
- * Messages the visitor wrote, keyed by id.
- *
- * Each carries a `body`, and that body NEVER goes into a request — `payload()`
- * below strips it. That is not an optimisation; it is the claim this page
- * makes, in the one place a reader can test it. Type a password into the body
- * field, run it, and the network tab shows the field was never sent.
+ * Messages the visitor wrote. Each carries a `body`, and `payload()` strips it
+ * before anything is sent — that omission is the claim this page makes, in the
+ * one place a reader can check it.
  */
 const drafts = new Map();
-
 let draftSeq = 0;
 
 const byId = (id) => drafts.get(id) ?? LIBRARY.find((m) => m.id === id);
-
-/** Everything in the test inbox, samples and drafts, in build order. */
 const inboxItems = () => [...[...inbox].map(byId), ...drafts.values()].filter(Boolean);
 
 /** Exactly the fields Gmail would hand the server. Note the absent body. */
 const payload = (d) => ({
-  id: d.id,
-  senderKey: d.senderKey,
-  senderName: d.senderName,
-  subject: d.subject,
-  ageDays: d.ageDays,
-  sizeKb: d.sizeKb,
-  labels: d.labels,
-  unread: d.unread,
-  hasUnsubscribe: d.hasUnsubscribe,
-  starred: d.starred,
-  hasAttachment: d.hasAttachment,
-  important: d.important,
-  youRepliedInThread: d.youRepliedInThread,
+  id: d.id, senderKey: d.senderKey, senderName: d.senderName, subject: d.subject,
+  ageDays: d.ageDays, sizeKb: d.sizeKb, labels: d.labels, unread: d.unread,
+  hasUnsubscribe: d.hasUnsubscribe, starred: d.starred, hasAttachment: d.hasAttachment,
+  important: d.important, youRepliedInThread: d.youRepliedInThread,
 });
 
-// ── Step 1: the library and the inbox ────────────────────────────────────
+// ── Panes ────────────────────────────────────────────────────────────────
 
 const GROUPS = [
-  { id: "bulk", title: "Everyday clutter",
-    blurb: "Marketing, digests and social noise — the mail the product exists to clear." },
-  { id: "tricky", title: "The ones that look like clutter",
-    blurb: "Each of these sits in a Gmail tab that cleanup tools sweep, and each is " +
-           "something you would be upset to lose. This is the half that matters." },
+  { id: "bulk", title: "Clutter" },
+  { id: "tricky", title: "Looks like clutter" },
 ];
 
 const tagsFor = (m) => [
@@ -106,7 +78,7 @@ const tagsFor = (m) => [
   ...(m.starred ? ["STARRED"] : []),
   ...(m.important ? ["IMPORTANT"] : []),
   ...(m.hasAttachment ? ["ATTACHMENT"] : []),
-  ...(m.hasUnsubscribe ? ["LIST-UNSUBSCRIBE"] : []),
+  ...(m.hasUnsubscribe ? ["UNSUB"] : []),
 ];
 
 function libraryCard(m) {
@@ -114,16 +86,12 @@ function libraryCard(m) {
   return `
     <div class="mail ${added ? "added" : ""}">
       <span>
-        <span class="line mail-from">${esc(m.senderName)}
-          <span class="mail-meta"> · ${esc(m.senderKey)}</span></span>
+        <span class="line mail-from">${esc(m.senderName)}</span>
         <span class="line mail-subject">${esc(m.subject)}</span>
-        <span class="line mail-meta">${esc(m.ageDays)} days old · ${esc(m.sizeKb)} KB</span>
-        <span class="line mail-note">${esc(m.note)}</span>
+        <span class="line mail-meta">${esc(m.senderKey)} · ${esc(m.ageDays)}d · ${esc(m.sizeKb)} KB</span>
       </span>
       <button class="mini ${added ? "" : "solid"}" type="button"
-              data-add="${esc(m.id)}" ${added ? "disabled" : ""}>
-        ${added ? "Added" : "Add"}
-      </button>
+              data-add="${esc(m.id)}" ${added ? "disabled" : ""}>${added ? "Added" : "Add"}</button>
     </div>`;
 }
 
@@ -132,27 +100,46 @@ function inboxCard(m) {
     <div class="mail">
       <span>
         <span class="line mail-from">${esc(m.senderName)}
-          <span class="mail-meta"> · ${esc(m.senderKey)}</span>
           ${m.custom ? `<span class="tag">YOURS</span>` : ""}</span>
-        <span class="line mail-subject">${esc(m.subject) || "<em>(no subject)</em>"}</span>
+        <span class="line mail-subject">${esc(m.subject) || "<em class='mail-meta'>(no subject)</em>"}</span>
+        <span class="line mail-meta">${esc(m.senderKey)}</span>
         ${m.body ? `<span class="line mail-body">${esc(m.body)}</span>` : ""}
         <span class="line">${tagsFor(m).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</span>
       </span>
       <button class="mini" type="button" data-remove="${esc(m.id)}"
-              aria-label="Remove ${esc(m.subject || "untitled message")} from the test inbox">Remove</button>
+              aria-label="Remove ${esc(m.subject || "untitled message")}">Remove</button>
     </div>`;
 }
 
-/**
- * The compose form.
- *
- * Its field list is not arbitrary — it is precisely the metadata Gmail returns
- * under `format: "metadata"`, which makes the form itself a statement of what
- * Mailwarden can see. The body sits below a rule, marked as staying put,
- * because it is the one field with no counterpart in the real read.
- */
+function renderLibrary() {
+  document.getElementById("library").innerHTML = GROUPS.map((g) => `
+    <div class="group-h">${esc(g.title)}</div>
+    <div class="mail-list">
+      ${LIBRARY.filter((m) => m.group === g.id).map(libraryCard).join("")}
+    </div>`).join("");
+}
+
+function renderInbox() {
+  const items = inboxItems();
+  document.getElementById("inbox").innerHTML = items.length
+    ? `<div class="mail-list">${items.map(inboxCard).join("")}</div>`
+    : `<p class="empty">Empty</p>`;
+
+  const n = items.length;
+  document.getElementById("inbox-count").textContent = n ? `(${fmt.format(n)})` : "";
+  document.getElementById("selection-note").textContent =
+    n === 0 ? "" : `${fmt.format(n)} ${plural(n, "message", "messages")}`;
+  for (const b of document.querySelectorAll("[data-run]")) b.disabled = n === 0;
+
+  const addBtn = document.getElementById("draft-add");
+  if (addBtn) addBtn.disabled = drafts.size >= LIMITS.maxCustom;
+}
+
+// ── Compose ──────────────────────────────────────────────────────────────
+
+/** The field list is the metadata Gmail returns — the form is the disclosure. */
 const CATEGORIES = [
-  ["", "None — Primary tab"],
+  ["", "Primary"],
   ["CATEGORY_PROMOTIONS", "Promotions"],
   ["CATEGORY_SOCIAL", "Social"],
   ["CATEGORY_UPDATES", "Updates"],
@@ -160,33 +147,28 @@ const CATEGORIES = [
 ];
 
 const FLAGS = [
-  ["unread", "Unread", "Bulk mail you never open is the strongest cleanup signal."],
-  ["hasUnsubscribe", "Has a List-Unsubscribe header", "Bulk mail carries one; security mail essentially never does."],
-  ["starred", "Starred", "G9 — never touched, whatever else is true."],
-  ["hasAttachment", "Has an attachment", "G11 — archived rather than trashed."],
-  ["important", "Gmail marked it Important", "G12 — archived rather than trashed."],
-  ["youRepliedInThread", "You replied in this thread", "G8 and G10 — the strongest protection there is."],
+  ["unread", "Unread"],
+  ["hasUnsubscribe", "Unsubscribe header"],
+  ["starred", "Starred"],
+  ["hasAttachment", "Attachment"],
+  ["important", "Important"],
+  ["youRepliedInThread", "You replied"],
 ];
 
 function composeForm() {
   return `
-    <h3 style="margin:0 0 2px">Write your own</h3>
-    <p class="muted" style="margin-bottom:12px">
-      These are exactly the fields Gmail gives Mailwarden for one message —
-      nothing more is available to it. Fill them however you like and watch what
-      the rules make of it.
-    </p>
+    <h3 style="margin:0 0 10px">Write your own</h3>
 
     <div class="form-grid">
-      <label class="f"><span>From (name)</span>
+      <label class="f"><span>From</span>
         <input id="d-name" type="text" placeholder="Acme Deals" maxlength="120"></label>
-      <label class="f"><span>From (address)</span>
+      <label class="f"><span>Address</span>
         <input id="d-email" type="text" placeholder="deals@acme.com" maxlength="200"
                inputmode="email" autocomplete="off"></label>
       <label class="f"><span>Subject</span>
         <input id="d-subject" type="text" placeholder="50% off everything"
                maxlength="${LIMITS.maxSubject}"></label>
-      <label class="f"><span>Gmail tab</span>
+      <label class="f"><span>Tab</span>
         <select id="d-cat">
           ${CATEGORIES.map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join("")}
         </select></label>
@@ -197,43 +179,31 @@ function composeForm() {
     </div>
 
     <fieldset class="flags">
-      <legend class="muted" style="font-size:.8rem">Headers and flags</legend>
-      ${FLAGS.map(([k, label, why]) => `
+      ${FLAGS.map(([k, label]) => `
         <label class="flag">
           <input type="checkbox" data-flag="${k}" ${k === "unread" ? "checked" : ""}>
-          <span><b>${esc(label)}</b><span class="muted"> — ${esc(why)}</span></span>
+          <span>${esc(label)}</span>
         </label>`).join("")}
     </fieldset>
 
     <div class="stays">
-      <label class="f"><span>Body <b class="stays-tag">stays in your browser</b></span>
-        <textarea id="d-body" rows="3"
-          placeholder="Type anything here — a password, if you like. It is not sent."></textarea></label>
-      <p class="muted" style="margin:6px 0 0;font-size:.82rem">
-        This field is never put into the request. Everything above it is, because
-        Gmail hands Mailwarden those headers; a body it never transfers at all.
-        Open your network tab before you press Add, then check
-        <code>/api/demo/run</code> — the body will not be there.
-      </p>
+      <label class="f"><span>Body <b class="stays-tag">not sent</b></span>
+        <textarea id="d-body" rows="2" placeholder="Never leaves your browser."></textarea></label>
     </div>
 
     <div class="btn-row" style="margin-top:12px">
       <button class="btn" type="button" id="draft-add">Add to inbox</button>
       <span class="muted" id="draft-error" role="alert"></span>
-    </div>
-    <p class="muted" id="draft-limit" style="margin:6px 0 0"></p>`;
+    </div>`;
 }
 
-/** Reads the form. Returns null with a message when the one required field is bad. */
+/** Mirrors the server's check so a typo is a sentence, not a silently dropped row. */
+const EMAIL = /^[^\s@,;<>"]{1,64}@[^\s@.,;<>"]{1,63}(?:\.[^\s@.,;<>"]{1,63})+$/;
+
 function readDraft() {
   const val = (id) => (document.getElementById(id)?.value ?? "").trim();
   const email = val("d-email").toLowerCase();
-
-  // Mirrors the server's EMAIL check. The server is the authority — this only
-  // exists so a typo is a sentence under the button, not a silently dropped row.
-  if (!/^[^\s@,;<>"]{1,64}@[^\s@.,;<>"]{1,63}(?:\.[^\s@.,;<>"]{1,63})+$/.test(email)) {
-    return { error: "Give the sender a plausible email address — that is what every rule keys off." };
-  }
+  if (!EMAIL.test(email)) return { error: "Needs a valid sender address." };
 
   const cat = val("d-cat");
   const flags = {};
@@ -255,42 +225,6 @@ function readDraft() {
   };
 }
 
-function renderLibrary() {
-  document.getElementById("library").innerHTML = GROUPS.map((g) => `
-    <div>
-      <h4 style="margin:12px 0 2px">${esc(g.title)}</h4>
-      <p class="muted" style="margin-bottom:9px">${esc(g.blurb)}</p>
-      <div class="mail-list">
-        ${LIBRARY.filter((m) => m.group === g.id).map(libraryCard).join("")}
-      </div>
-    </div>`).join("");
-}
-
-function renderInbox() {
-  const items = inboxItems();
-  document.getElementById("inbox").innerHTML = items.length
-    ? `<div class="mail-list">${items.map(inboxCard).join("")}</div>`
-    : `<p class="empty">Empty — add samples from the left, or write your own
-         below. Whatever lands here shows its full body text, so you can see
-         exactly what gets redacted when you run it.</p>`;
-
-  const n = items.length;
-  document.getElementById("inbox-count").textContent = n ? `(${fmt.format(n)})` : "";
-  document.getElementById("selection-note").textContent = n === 0
-    ? "Nothing in the inbox yet — add a message above."
-    : `${fmt.format(n)} ${plural(n, "message", "messages")} ready.`;
-  for (const b of document.querySelectorAll("[data-run]")) b.disabled = n === 0;
-
-  const addBtn = document.getElementById("draft-add");
-  if (addBtn) {
-    const full = drafts.size >= LIMITS.maxCustom;
-    addBtn.disabled = full;
-    document.getElementById("draft-limit").textContent = full
-      ? `That's the limit of ${fmt.format(LIMITS.maxCustom)} custom messages. Remove one to add another.`
-      : "";
-  }
-}
-
 function renderCompose() {
   const el = document.getElementById("compose");
   // Rendered once: re-rendering on every add would wipe a half-typed draft.
@@ -301,20 +235,12 @@ const renderPanes = () => { renderLibrary(); renderInbox(); renderCompose(); };
 
 // ── Charts ───────────────────────────────────────────────────────────────
 
-/**
- * A redaction bar whose width tracks the length of the value it replaces, so
- * the shape of the message survives and the content does not.
- *
- * The withheld text is genuinely not in this element — no hidden span, nothing
- * to reveal in the inspector. On a page arguing about data minimisation, a
- * black rectangle painted over real text would be the wrong joke.
- */
+/** The withheld text is genuinely not in this element — nothing to reveal. */
 const redactionBar = (text, cap = 30) => {
-  const width = Math.min(100, Math.max(12, (String(text).length / cap) * 100));
-  return `<span class="bar" style="width:${width.toFixed(0)}%"></span>`;
+  const w = Math.min(100, Math.max(12, (String(text).length / cap) * 100));
+  return `<span class="bar" style="width:${w.toFixed(0)}%"></span>`;
 };
 
-/** One stacked bar. Part-to-whole of two segments, both directly labelled. */
 function splitBar(held, moved) {
   const total = held + moved;
   if (total === 0) return "";
@@ -325,61 +251,39 @@ function splitBar(held, moved) {
       <span class="key moved"><i></i>${fmt.format(moved)} cleaned</span>
     </div>
     <div class="split" role="img"
-         aria-label="${fmt.format(held)} of ${fmt.format(total)} messages protected, ${fmt.format(moved)} cleaned">
+         aria-label="${fmt.format(held)} of ${fmt.format(total)} protected, ${fmt.format(moved)} cleaned">
       ${held ? `<span class="s-held" style="width:${w(held)}" title="${fmt.format(held)} protected"></span>` : ""}
       ${moved ? `<span class="s-moved" style="width:${w(moved)}" title="${fmt.format(moved)} cleaned"></span>` : ""}
     </div>`;
 }
 
-/**
- * Horizontal bars, one hue for every bar.
- *
- * The guards are nominal categories, so shading them by value would burn the
- * only free channel re-encoding the length the bar already shows. Sorted by
- * magnitude, each bar carries its own number, and the guard roster underneath
- * is the table view of the same data.
- */
 function guardBars(guards, held) {
   const hit = guards
     .filter((g) => g.hits.length)
-    .map((g) => ({
-      id: g.id, title: g.title,
-      n: g.hits.reduce((sum, h) => sum + h.messageCount, 0),
-    }))
+    .map((g) => ({ id: g.id, title: g.title, n: g.hits.reduce((s, h) => s + h.messageCount, 0) }))
     .sort((a, b) => b.n - a.n);
-
   if (!hit.length) return "";
-  const max = Math.max(...hit.map((g) => g.n));
 
-  /*
-   * These bars do NOT decompose the held pile, and the heading must not imply
-   * they do. A message can trip several guards at once — the Amazon receipt is
-   * both a protected category and Gmail-important — so the bars sum to more
-   * than the number of messages held. Saying so is cheaper than a reader
-   * finding the discrepancy and distrusting every other number on the page.
-   */
-  const sum = hit.reduce((a, g) => a + g.n, 0);
-  const overlap = sum - held;
+  const max = Math.max(...hit.map((g) => g.n));
+  // These do not decompose the held pile: a message can trip several guards, so
+  // the bars sum to more than the number held. Saying so is cheaper than a
+  // reader finding the discrepancy and distrusting every other number here.
+  const overlap = hit.reduce((a, g) => a + g.n, 0) - held;
 
   return `
-    <h3 style="margin:20px 0 0">What each guardrail objected to</h3>
-    ${overlap > 0 ? `<p class="muted" style="margin:2px 0 0">
-        ${fmt.format(overlap)} of these are the same ${plural(overlap, "message", "messages")}
-        counted twice — ${plural(overlap, "it trips", "they trip")} more than one guard,
-        so the bars total more than the ${fmt.format(held)} held.
-      </p>` : ""}
+    ${overlap > 0 ? `<p class="note" style="margin:0 0 4px">${fmt.format(overlap)}
+       counted twice — some messages trip more than one guard.</p>` : ""}
     <div class="bars">
       ${hit.map((g) => `
-        <div class="bar-row" title="${esc(g.id)} ${esc(g.title)}: ${fmt.format(g.n)} ${plural(g.n, "message", "messages")}">
+        <div class="bar-row" title="${esc(g.id)} ${esc(g.title)}: ${fmt.format(g.n)}">
           <span class="bar-label"><b>${esc(g.id)}</b> ${esc(g.title)}</span>
-          <span class="bar-track"><span class="bar-fill"
-                style="width:${((g.n / max) * 100).toFixed(1)}%"></span></span>
+          <span class="bar-track"><span class="bar-fill" style="width:${((g.n / max) * 100).toFixed(1)}%"></span></span>
           <span class="bar-n">${fmt.format(g.n)}</span>
         </div>`).join("")}
     </div>`;
 }
 
-// ── Stage 1: redaction ───────────────────────────────────────────────────
+// ── Result stages ────────────────────────────────────────────────────────
 
 function stageRedaction(t) {
   const stored = t.ingest.rows.filter((r) => !r.labels.split(",").includes("SENT"));
@@ -391,35 +295,25 @@ function stageRedaction(t) {
     return `
       <div class="redact-pair">
         <div class="doc">
-          <div class="doc-title">In your mailbox</div>
           <div class="field"><span class="field-k">From</span>
             <span class="field-v">${esc(m.senderName)} &lt;${esc(m.senderKey)}&gt;</span></div>
           <div class="field"><span class="field-k">Subject</span>
             <span class="field-v">${esc(m.subject)}</span></div>
           <div class="field"><span class="field-k">Body</span>
-            <span class="field-v">${esc(m.body)}</span></div>
+            <span class="field-v">${esc(m.body) || `<span class="note">(none)</span>`}</span></div>
         </div>
-
         <div class="arrow-col" aria-hidden="true">→</div>
-
         <div class="doc kept">
-          <div class="doc-title">What Mailwarden kept</div>
           <div class="field"><span class="field-k">From</span>
-            <span class="field-v">${esc(row.senderKey)}
-              <span class="verdict-note">Kept — the sender is the unit of every decision.</span>
-            </span></div>
+            <span class="field-v">${esc(row.senderKey)}</span></div>
           <div class="field"><span class="field-k">Subject</span>
             <span class="field-v">${redactionBar(m.subject)}
               <span class="mono">${esc(row.subjectHash)}</span>
-              <span class="verdict-note">Read, salted-hashed, plaintext dropped. Counts repeated templates; reads back as nothing.</span>
-            </span></div>
+              <span class="line note">hashed</span></span></div>
           <div class="field"><span class="field-k">Body</span>
-            <span class="field-v">${m.body ? redactionBar(m.body, 60) : `<span class="verdict-note">(none)</span>`}
-              <span class="verdict-note">${m.custom
-                ? "You typed this, and it never left your browser — it was not in the request that produced this page."
-                : `Never requested. <code>format: ${esc(r.fetchFormat)}</code> cannot return one.`}</span>
-            </span></div>
-          <div class="field"><span class="field-k">Envelope</span>
+            <span class="field-v">${m.body ? redactionBar(m.body, 60) : ""}
+              <span class="line note">${m.custom ? "never left your browser" : "never requested"}</span></span></div>
+          <div class="field"><span class="field-k">Rest</span>
             <span class="field-v mono">${esc(row.labels)} · ${esc(kb(row.sizeBytes))} · ${esc(ago(row.internalDate, t.now))}</span></div>
         </div>
       </div>`;
@@ -427,73 +321,39 @@ function stageRedaction(t) {
 
   return `
     <div class="stage">
-      <span class="stage-n">STAGE 1 / 4</span>
-      <h2 style="margin-top:4px">What gets redacted before anything is stored</h2>
-      <p class="muted">
-        Mailwarden asks Gmail for <code>format: ${esc(r.fetchFormat)}</code> and
-        exactly ${fmt.format(r.headersRequested.length)} headers —
-        ${r.headersRequested.map((h) => `<code>${esc(h)}</code>`).join(", ")}.
-        That is the narrowest read the Gmail API offers: bodies and attachments
-        are never transferred at all, and no recipient header is requested.
-        Of what does arrive, ${r.discarded.map((d) => `<code>${esc(d)}</code>`).join(" and ")}
-        is hashed and the readable version thrown away.
-      </p>
-      <p class="muted">
-        You can check this one yourself: the sample bodies on the left came from
-        the catalogue, and the response that drew everything below has no body
-        field in it at all. Open your network tab and look at
-        <code>/api/demo/run</code>.
+      <h2>Stored</h2>
+      <p class="note" style="margin:-8px 0 12px">
+        <code>format: ${esc(r.fetchFormat)}</code> ·
+        ${r.headersRequested.map((h) => `<code>${esc(h)}</code>`).join(" ")}
       </p>
       ${stored.map(pair).join("")}
     </div>`;
 }
 
-// ── Stage 2: classification ──────────────────────────────────────────────
-
 function stageClassify(t) {
-  const TIER = {
-    heuristic: "settled by a local rule — never sent anywhere",
-    "model-unavailable": "local rules declined; took the model-unavailable path",
-    "too-small": "too little evidence to judge — left alone",
-  };
-
   return `
     <div class="stage">
-      <span class="stage-n">STAGE 2 / 4</span>
-      <h2 style="margin-top:4px">What the classifier was allowed to see</h2>
-      <p class="muted">
-        Decisions are made per <em>sender</em>, not per message, from counted
-        facts only. The line under each verdict is the complete input — and the
-        complete answer to "what would you send a language model?" There is no
-        subject and no prose in it, because by this point neither exists.
-      </p>
-      ${t.senders.map((s) => {
-        const f = s.facts;
-        const v = s.verdict;
-        return `
+      <h2>Senders</h2>
+      ${t.senders.map(({ facts: f, verdict: v }) => `
         <div class="row">
           <div><strong>${esc(f.displayName || f.senderKey)}</strong>
             <span class="muted">· ${esc(f.senderKey)}</span></div>
-          <div style="margin:4px 0 6px">
+          <div style="margin:3px 0 5px">
             <span class="${v.protectedSender ? "verdict-protected" : "verdict-clean"}">${esc(v.category)}</span>
-            <span class="muted">· ${esc(pct(v.confidence))} confidence ·
+            <span class="muted">· ${esc(pct(v.confidence))} ·
               ${v.protectedSender ? "protected" : "actionable"}</span>
           </div>
-          <div style="font-size:.89rem">${esc(v.reason)}</div>
-          <div class="mono muted" style="margin-top:6px">
-            ${fmt.format(f.messageCount)} ${plural(f.messageCount, "message", "messages")} ·
+          <div style="font-size:.88rem">${esc(v.reason)}</div>
+          <div class="mono muted" style="margin-top:5px">
+            ${fmt.format(f.messageCount)} ${plural(f.messageCount, "msg", "msgs")} ·
             ${fmt.format(f.unreadCount)} unread ·
-            ${fmt.format(f.distinctSubjectHashes)} distinct subject ${plural(f.distinctSubjectHashes, "template", "templates")} ·
-            unsubscribe header: ${f.hasUnsubscribe ? "yes" : "no"} ·
-            you have written back: ${f.userReplied ? "yes" : "no"}
+            ${fmt.format(f.distinctSubjectHashes)} ${plural(f.distinctSubjectHashes, "template", "templates")} ·
+            unsub ${f.hasUnsubscribe ? "yes" : "no"} ·
+            replied ${f.userReplied ? "yes" : "no"}
           </div>
-          <div class="muted" style="font-size:.8rem;margin-top:4px">${esc(TIER[s.tier] || s.tier)}</div>
-        </div>`;
-      }).join("")}
+        </div>`).join("")}
     </div>`;
 }
-
-// ── Stage 3: the guard layer ─────────────────────────────────────────────
 
 function stageGuards(t) {
   const fired = t.guards.filter((g) => g.fired);
@@ -508,40 +368,28 @@ function stageGuards(t) {
         </div>
         ${g.message ? `<div class="guard-detail">${esc(g.message)}</div>` : ""}
         ${g.hits.map((h) => `
-          <div class="guard-detail">
-            <strong>${esc(h.senderKey)}</strong> — ${fmt.format(h.messageCount)}
-            ${plural(h.messageCount, "message", "messages")} held. ${esc(h.reason)}
-          </div>`).join("")}
-        ${g.fired ? "" : `<div class="guard-detail">Checked. Nothing in this batch matched.</div>`}
+          <div class="guard-detail"><strong>${esc(h.senderKey)}</strong> —
+            ${fmt.format(h.messageCount)} held. ${esc(h.reason)}</div>`).join("")}
       </div>
     </div>`;
 
   return `
     <div class="stage">
-      <span class="stage-n">STAGE 3 / 4</span>
-      <h2 style="margin-top:4px">The guardrails</h2>
-      <p class="muted">
-        Every change to a mailbox goes through one function, and this is its full
-        output — including the ${fmt.format(idle.length)} guards that found
-        nothing to stop. A guard either narrows the batch, asks for a second
-        confirmation, or refuses it outright.
-      </p>
+      <h2>Guardrails</h2>
       ${guardBars(t.guards, t.outcome.held.length)}
       ${fired.map(guardRow).join("")}
       ${idle.length ? `
         <details class="more">
-          <summary>${fmt.format(idle.length)} more guards ran and matched nothing</summary>
+          <summary>${fmt.format(idle.length)} more checked, no match</summary>
           ${idle.map(guardRow).join("")}
         </details>` : ""}
     </div>`;
 }
 
-// ── Stage 4: the outcome ─────────────────────────────────────────────────
-
 function stageOutcome(t) {
   const name = (id) => {
     const m = byId(id);
-    return m ? `${m.senderName} — ${m.subject}` : id;
+    return m ? `${m.senderName} — ${m.subject || "(no subject)"}` : id;
   };
 
   const blocked = t.guards.some((g) => g.fired && g.severity === "block");
@@ -549,61 +397,43 @@ function stageOutcome(t) {
   const held = t.outcome.held.length;
 
   const banner = blocked
-    ? `<div class="callout danger">
-         <strong>Refused.</strong> Nothing would move. The batch failed a
-         blocking guard, and Mailwarden fails closed — it does not run the part
-         of a batch that was legal.
-       </div>`
+    ? `<div class="callout danger"><strong>Refused.</strong> Nothing moves.</div>`
     : t.outcome.requiresConfirmation
-      ? `<div class="callout" style="border-color:var(--held-ink);color:var(--text)">
-           <strong>Paused for confirmation.</strong> The batch is legal but
-           unusually broad, so it needs a second, explicit yes. Nothing has been
-           decided yet.
-         </div>
-         <p><button class="btn" type="button" data-confirm="${esc(t.action)}">
-           Yes, ${esc(t.action)} them</button></p>`
+      ? `<div class="callout" style="border-color:var(--held-ink)">
+           <strong>Needs confirmation.</strong> Nothing decided yet.
+           <p style="margin:8px 0 0"><button class="btn" type="button"
+              data-confirm="${esc(t.action)}">Yes, ${esc(t.action)}</button></p>
+         </div>`
       : `<div class="callout safe">${esc(t.outcome.reversal)}</div>`;
 
   return `
     <div class="stage">
-      <span class="stage-n">STAGE 4 / 4</span>
-      <h2 style="margin-top:4px">The result</h2>
-
+      <h2>Result</h2>
       <div class="tiles">
-        <div class="tile held">
-          <div class="tile-n">${fmt.format(held)}</div>
-          <div class="tile-k">held back by a guardrail</div>
-        </div>
+        <div class="tile held"><div class="tile-n">${fmt.format(held)}</div>
+          <div class="tile-k">held back</div></div>
         <div class="tile ${blocked ? "refused" : ""}">
           <div class="tile-n">${blocked ? "0" : fmt.format(moved)}</div>
-          <div class="tile-k">${blocked ? "refused — nothing moves" : `would be ${t.action === "trash" ? "trashed" : "archived"}`}</div>
-        </div>
-        <div class="tile">
-          <div class="tile-n">${fmt.format(t.ingest.candidateCount)}</div>
-          <div class="tile-k">considered in total</div>
-        </div>
+          <div class="tile-k">${blocked ? "refused" : t.action === "trash" ? "trashed" : "archived"}</div></div>
+        <div class="tile"><div class="tile-n">${fmt.format(t.ingest.candidateCount)}</div>
+          <div class="tile-k">considered</div></div>
       </div>
-
       ${blocked ? "" : splitBar(held, moved)}
       ${banner}
-
       ${moved && !blocked ? `
-        <h3 style="margin-top:20px">Would be ${t.action === "trash" ? "moved to trash" : "archived"}</h3>
-        ${t.outcome.moving.map((m) => `<div class="row">${esc(name(m.id))}</div>`).join("")}
-      ` : ""}
-
+        <h3>${t.action === "trash" ? "Trashed" : "Archived"}</h3>
+        ${t.outcome.moving.map((m) => `<div class="row">${esc(name(m.id))}</div>`).join("")}` : ""}
       ${held ? `
-        <h3 style="margin-top:20px">Held back, and why</h3>
+        <h3 style="margin-top:18px">Held back</h3>
         ${t.outcome.held.map((h) => `
           <div class="row">
             <div>${esc(name(h.id))}</div>
             ${h.by.map((b) => `
-              <div style="margin-top:4px">
+              <div style="margin-top:3px">
                 <span class="chip held">${esc(b.id)} ${esc(b.code)}</span>
-                <span class="muted" style="font-size:.85rem">${esc(b.reason)}</span>
+                <span class="muted" style="font-size:.84rem">${esc(b.reason)}</span>
               </div>`).join("")}
-          </div>`).join("")}
-      ` : ""}
+          </div>`).join("")}` : ""}
     </div>`;
 }
 
@@ -619,14 +449,14 @@ function renderTrace(t) {
 async function run(action, confirmed) {
   const el = document.getElementById("result");
   el.className = "card";
-  el.innerHTML = `<p class="muted">Running the pipeline…</p>`;
+  el.innerHTML = `<p class="muted">Running…</p>`;
   try {
     renderTrace(await api("/api/demo/run", {
       method: "POST",
       body: { ids: [...inbox], custom: [...drafts.values()].map(payload), action, confirmed },
     }));
   } catch (err) {
-    el.innerHTML = `<p class="callout danger">Could not run the demo: ${esc(err.message)}</p>`;
+    el.innerHTML = `<p class="callout danger">${esc(err.message)}</p>`;
   }
 }
 
@@ -638,6 +468,13 @@ document.addEventListener("click", (e) => {
   if (remove) {
     inbox.delete(remove.dataset.remove);
     drafts.delete(remove.dataset.remove);
+    return void renderPanes();
+  }
+
+  const pick = e.target.closest("[data-pick]");
+  if (pick) {
+    if (pick.dataset.pick === "all") for (const m of LIBRARY) inbox.add(m.id);
+    else { inbox.clear(); drafts.clear(); }
     return void renderPanes();
   }
 
@@ -654,33 +491,36 @@ document.addEventListener("click", (e) => {
     return void renderInbox();
   }
 
-  const pick = e.target.closest("[data-pick]");
-  if (pick) {
-    if (pick.dataset.pick === "all") { for (const m of LIBRARY) inbox.add(m.id); }
-    else { inbox.clear(); drafts.clear(); }
-    return void renderPanes();
-  }
-
   const runBtn = e.target.closest("[data-run]");
   if (runBtn) return void run(runBtn.dataset.run, false);
 
-  // The confirm button re-runs the SAME request with confirmed:true rather than
-  // executing a stored plan — mirroring the real app, where a clean plan is
-  // never an authorisation on its own and everything is re-derived.
+  // Re-runs the same request rather than executing a stored plan, mirroring the
+  // real app: a clean plan is never an authorisation on its own.
   const confirmBtn = e.target.closest("[data-confirm]");
   if (confirmBtn) return void run(confirmBtn.dataset.confirm, true);
 });
 
-api("/api/demo/inbox")
-  .then((data) => {
+/**
+ * The catch covers the FETCH only, never the render.
+ *
+ * With `renderPanes()` inside the success handler, any bug in rendering landed
+ * in the same catch and told the visitor "could not load samples" — blaming
+ * the network for a fault in this file, which is the kind of error message
+ * that costs an afternoon. A render fault now surfaces as an unhandled
+ * rejection in the console, where it belongs.
+ */
+api("/api/demo/inbox").then(
+  (data) => {
     LIBRARY = data.messages;
     if (data.limits) LIMITS = { ...LIMITS, ...data.limits };
-    // Deliberately starts EMPTY. A pre-filled inbox answers the question before
-    // the visitor has asked it, and the point of the page is that they choose
-    // what goes in — including mail they write themselves.
-    renderPanes();
-  })
-  .catch(() => {
+    return true;
+  },
+  () => false,
+).then((loaded) => {
+  if (!loaded) {
     document.getElementById("library").innerHTML =
-      `<p class="callout danger">Could not load the samples. Reload the page to try again.</p>`;
-  });
+      `<p class="callout danger">Could not load samples. Reload to retry.</p>`;
+    return;
+  }
+  renderPanes();
+});

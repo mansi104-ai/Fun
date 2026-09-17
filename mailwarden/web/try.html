@@ -4,13 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Try Mailwarden on a test inbox</title>
-<meta name="description" content="Add and remove sample emails in a test inbox and watch Mailwarden decide. See exactly which text is redacted before anything is stored, and which guardrail holds each message back. No sign-in, no permissions." />
+<meta name="description" content="Add sample emails or write your own, pick an action, and see what Mailwarden would do with them — what it stores, what it redacts, and which guardrail holds each message back." />
 <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
 <meta name="theme-color" content="#0a0a0a" />
 <meta property="og:type" content="website" />
 <meta property="og:title" content="Try Mailwarden on a test inbox" />
-<meta property="og:description" content="Add the mail, pick the action, and watch the real guardrails decide what moves and what stays." />
+<meta property="og:description" content="Add the mail, pick the action, see what would happen." />
 <meta property="og:url" content="https://mailwarden.xyz/try.html" />
 <meta property="og:image" content="https://mailwarden.xyz/brand/og.png" />
 <meta property="og:image:width" content="1200" />
@@ -24,21 +24,13 @@
   /* Page-specific only. Everything shared lives in brand.css. */
 
   /*
-   * COLOUR IN THIS PAGE'S CHARTS
+   * Two channels, never three.
    *
-   * brand.css ships three semantic colours and the validator says two of them
-   * cannot be used together: --danger (#b42318) and --warn (#b54708) sit ΔE 6.1
-   * apart for normal vision, which is a hard fail — most readers cannot tell
-   * them apart, colour vision deficiency or not.
-   *
-   * So the charts use two channels only, and they never co-occur with a third:
-   *   protected/held  --safe      the saves; the thing this page exists to prove
-   *   cleaned/moved   neutral ink the mundane outcome, deliberately quiet
-   *   refused         --danger    only ever alone (a blocked batch moves nothing)
-   *
-   * Green-for-held reads backwards for one second and correctly forever after:
-   * on a page about not losing mail, the protected pile is the good news. Every
-   * segment and bar is directly labelled, so colour is never the only channel.
+   * The validator fails brand --danger (#b42318) against --warn (#b54708) at
+   * ΔE 6.1 for normal vision — most readers cannot tell them apart. So charts
+   * use --safe plus a neutral, and --danger appears only when it is alone (a
+   * blocked batch moves nothing). Every mark is directly labelled, so colour
+   * is never the only channel.
    */
   :root {
     --held-ink: var(--safe);
@@ -54,147 +46,124 @@
     }
   }
 
-  .step-label {
-    display: block; font-size: .74rem; font-weight: 660;
-    letter-spacing: .09em; text-transform: uppercase;
-    color: var(--muted); margin: 0 0 6px;
-  }
-  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .line { display: block; }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 
-  /* ── Library / inbox, side by side on a desk and stacked on a phone ─── */
+  /* ── Panes ───────────────────────────────────────────────────────── */
 
   .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
   @media (max-width: 800px) { .panes { grid-template-columns: 1fr; } }
 
   .pane-head {
     display: flex; align-items: baseline; justify-content: space-between;
-    gap: 10px; margin-bottom: 4px;
+    gap: 10px; margin-bottom: 8px;
   }
-  .pane-scroll { max-height: 560px; overflow-y: auto; padding-right: 4px; }
+  .pane-head h3 { margin: 0; }
+  .pane-scroll { max-height: 520px; overflow-y: auto; padding-right: 4px; }
   @media (max-width: 800px) { .pane-scroll { max-height: none; } }
 
-  .mail-list { display: grid; gap: 8px; margin: 0 0 14px; }
+  .group-h {
+    font-size: .72rem; font-weight: 660; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted); margin: 14px 0 6px;
+  }
+  .group-h:first-child { margin-top: 0; }
 
+  .mail-list { display: grid; gap: 7px; }
   .mail {
     display: grid; grid-template-columns: 1fr auto; gap: 10px;
-    align-items: start; padding: 11px 12px;
+    align-items: center; padding: 10px 12px;
     border: 1px solid var(--border); border-radius: var(--radius-sm);
-    background: var(--surface); text-align: left; font: inherit; color: var(--text);
-    width: 100%;
+    background: var(--surface); width: 100%;
   }
-  .mail.added { opacity: .5; }
+  .mail.added { opacity: .45; }
 
-  .mail-from { font-weight: 620; font-size: .92rem; }
-  .mail-subject { font-size: .9rem; margin: 1px 0 3px; }
-  .mail-meta { font-size: .79rem; color: var(--muted); }
-  .mail-note { font-size: .81rem; color: var(--muted); font-style: italic; margin-top: 3px; }
+  .mail-from { font-weight: 620; font-size: .9rem; }
+  .mail-subject { font-size: .89rem; }
+  .mail-meta { font-size: .78rem; color: var(--muted); }
   .mail-body {
-    font-size: .81rem; color: var(--muted); margin-top: 5px;
+    font-size: .8rem; color: var(--muted); margin-top: 4px;
     border-left: 2px solid var(--border); padding-left: 9px;
   }
 
   .mini {
     font: inherit; font-size: .82rem; font-weight: 600;
-    padding: 6px 12px; min-height: 34px;
-    border-radius: 999px; border: 1px solid var(--border);
-    background: var(--surface); color: var(--text); cursor: pointer;
-    white-space: nowrap;
+    padding: 6px 12px; min-height: 34px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); cursor: pointer; white-space: nowrap;
   }
   .mini:hover:not(:disabled) { background: var(--raised); }
   .mini:disabled { opacity: .5; cursor: default; }
   .mini.solid { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
 
   .tag {
-    display: inline-block; font-size: .69rem; font-weight: 600;
+    display: inline-block; font-size: .68rem; font-weight: 600;
     letter-spacing: .03em; padding: 2px 7px; border-radius: 999px;
-    background: var(--raised); color: var(--muted); margin: 3px 4px 0 0;
+    background: var(--raised); color: var(--muted); margin: 4px 4px 0 0;
     font-family: var(--font-mono);
   }
 
   .empty {
     border: 1px dashed var(--border); border-radius: var(--radius-sm);
-    padding: 26px 18px; text-align: center; color: var(--muted); font-size: .9rem;
+    padding: 28px 18px; text-align: center; color: var(--muted); font-size: .88rem;
   }
 
   /* ── Compose ─────────────────────────────────────────────────────── */
 
-  .compose { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 18px; }
-
-  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+  .compose { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
   .f { display: block; }
-  .f > span {
-    display: block; font-size: .8rem; color: var(--muted); margin-bottom: 4px;
-  }
+  .f > span { display: block; font-size: .78rem; color: var(--muted); margin-bottom: 4px; }
   .f input, .f select, .f textarea { margin: 0; }
 
-  .flags { border: 0; padding: 12px 0 0; margin: 0; }
-  .flags legend { padding: 0; }
+  .flags {
+    border: 0; padding: 12px 0 0; margin: 0;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 2px 14px;
+  }
   .flag {
-    display: grid; grid-template-columns: 20px 1fr; gap: 9px;
-    align-items: start; font-size: .84rem; padding: 4px 0; cursor: pointer;
+    display: grid; grid-template-columns: 18px 1fr; gap: 8px;
+    align-items: center; font-size: .84rem; padding: 3px 0; cursor: pointer;
   }
   /* Checkboxes inherit the 100%-width input rule from brand.css otherwise. */
   .flag input[type="checkbox"] {
-    width: 17px; height: 17px; min-height: 0; margin: 2px 0 0; padding: 0;
+    width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0;
     accent-color: var(--text);
   }
 
-  /*
-   * The body field, set apart on purpose.
-   *
-   * The rule above it is the privacy boundary made visible: everything higher
-   * up is sent, this is not. A form that mixed it in with the rest would be
-   * making the same claim in a footnote nobody reads.
-   */
-  .stays {
-    margin-top: 14px; padding-top: 12px;
-    border-top: 2px dashed var(--held-ink);
-  }
+  /* The rule is the privacy boundary made visible: above it is sent, below is not. */
+  .stays { margin-top: 14px; padding-top: 12px; border-top: 2px dashed var(--held-ink); }
   .stays-tag {
-    color: var(--held-ink); font-weight: 660; font-size: .74rem;
+    color: var(--held-ink); font-weight: 660; font-size: .72rem;
     letter-spacing: .03em; text-transform: uppercase;
   }
 
   /* ── Redaction ───────────────────────────────────────────────────── */
 
   .redact-pair {
-    display: grid; grid-template-columns: 1fr 22px 1fr; gap: 10px;
-    align-items: stretch; margin-bottom: 12px;
+    display: grid; grid-template-columns: 1fr 20px 1fr; gap: 10px; margin-bottom: 10px;
   }
   @media (max-width: 720px) { .redact-pair { grid-template-columns: 1fr; gap: 6px; } }
 
   .doc {
     border: 1px solid var(--border); border-radius: var(--radius-sm);
-    padding: 11px 13px; background: var(--surface); min-width: 0;
+    padding: 10px 12px; background: var(--surface); min-width: 0;
   }
   .doc.kept { border-color: var(--held-ink); }
-  .doc-title {
-    font-size: .7rem; font-weight: 680; letter-spacing: .07em; text-transform: uppercase;
-    color: var(--muted); margin-bottom: 8px;
-  }
-  .doc.kept .doc-title { color: var(--held-ink); }
-
-  .field { display: grid; grid-template-columns: 62px 1fr; gap: 8px; margin-bottom: 5px; font-size: .84rem; }
-  .field-k { color: var(--muted); font-size: .78rem; padding-top: 1px; }
+  .field { display: grid; grid-template-columns: 58px 1fr; gap: 8px; margin-bottom: 4px; font-size: .83rem; }
+  .field-k { color: var(--muted); font-size: .76rem; padding-top: 1px; }
   .field-v { min-width: 0; overflow-wrap: anywhere; }
 
-  /* A real black bar, not styled text with the original hiding underneath —
-     the withheld value genuinely is not in this element. */
+  /* A real bar: the withheld value is genuinely not in this element. */
   .bar {
-    display: inline-block; height: .78em; border-radius: 2px;
-    background: var(--text); opacity: .82; vertical-align: -1px;
-    max-width: 100%;
+    display: inline-block; height: .76em; border-radius: 2px;
+    background: var(--text); opacity: .82; vertical-align: -1px; max-width: 100%;
   }
-  .bar + .bar { margin-left: 4px; }
-  .verdict-note { font-size: .74rem; color: var(--muted); margin-top: 2px; }
-
-  .arrow-col { display: grid; place-items: center; color: var(--muted); font-size: 1.1rem; }
-  @media (max-width: 720px) { .arrow-col { height: 18px; } }
+  .note { font-size: .73rem; color: var(--muted); }
+  .arrow-col { display: grid; place-items: center; color: var(--muted); }
+  @media (max-width: 720px) { .arrow-col { height: 16px; } }
 
   /* ── Charts ──────────────────────────────────────────────────────── */
 
-  .tiles { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 18px; }
+  .tiles { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 16px; }
   .tile {
     flex: 1 1 130px; border: 1px solid var(--border);
     border-radius: var(--radius-sm); padding: 12px 14px; background: var(--surface);
@@ -202,48 +171,48 @@
   .tile-n { font-size: 1.7rem; font-weight: 660; letter-spacing: -.02em; line-height: 1.1; }
   .tile.held .tile-n { color: var(--held-ink); }
   .tile.refused .tile-n { color: var(--danger); }
-  .tile-k { font-size: .79rem; color: var(--muted); margin-top: 2px; }
+  .tile-k { font-size: .78rem; color: var(--muted); margin-top: 2px; }
 
-  /* One stacked bar: proportion at a glance, with both parts labelled. */
-  .split { display: flex; gap: 2px; height: 14px; margin: 0 0 8px; }
+  .split { display: flex; gap: 2px; height: 13px; margin: 0 0 16px; }
   .split span { border-radius: 2px; min-width: 3px; }
   .split span:first-child { border-radius: 7px 2px 2px 7px; }
   .split span:last-child { border-radius: 2px 7px 7px 2px; }
-  /* A lone segment is both first and last, and :last-child would otherwise
-     leave its left end square. */
   .split span:only-child { border-radius: 7px; }
   .split .s-held { background: var(--held-fill); }
   .split .s-moved { background: var(--moved-fill); }
 
-  .keys { display: flex; gap: 16px; flex-wrap: wrap; font-size: .82rem; margin-bottom: 4px; }
+  .keys { display: flex; gap: 16px; flex-wrap: wrap; font-size: .81rem; margin-bottom: 5px; }
   .key { display: flex; align-items: center; gap: 6px; color: var(--muted); }
   .key i { width: 10px; height: 10px; border-radius: 3px; display: block; }
   .key.held i { background: var(--held-fill); }
   .key.moved i { background: var(--moved-fill); }
 
-  /* Horizontal bars. One hue for every bar: the categories are nominal, so
-     length is the only thing worth encoding. */
-  .bars { display: grid; gap: 7px; margin: 12px 0 4px; }
+  /* One hue for every bar: the categories are nominal, so length is the only
+     thing worth encoding. */
+  .bars { display: grid; gap: 7px; margin: 10px 0 16px; }
   .bar-row { display: grid; grid-template-columns: minmax(96px, 27%) 1fr auto; gap: 10px; align-items: center; }
-  .bar-label { font-size: .82rem; overflow-wrap: anywhere; }
-  .bar-label b { font-family: var(--font-mono); font-weight: 640; font-size: .79rem; }
+  .bar-label { font-size: .81rem; overflow-wrap: anywhere; }
+  .bar-label b { font-family: var(--font-mono); font-weight: 640; font-size: .78rem; }
   .bar-track { background: var(--plot-track); border-radius: 4px; height: 9px; }
   .bar-fill { background: var(--held-fill); border-radius: 4px; height: 9px; min-width: 4px; }
-  .bar-n { font-family: var(--font-mono); font-size: .8rem; color: var(--muted); }
-  @media (max-width: 560px) { .bar-row { grid-template-columns: 1fr auto; } .bar-row .bar-track { grid-column: 1 / -1; } }
+  .bar-n { font-family: var(--font-mono); font-size: .79rem; color: var(--muted); }
+  @media (max-width: 560px) {
+    .bar-row { grid-template-columns: 1fr auto; }
+    .bar-row .bar-track { grid-column: 1 / -1; }
+  }
 
-  /* ── Trace chrome ────────────────────────────────────────────────── */
+  /* ── Results ─────────────────────────────────────────────────────── */
 
-  .stage { border-top: 1px solid var(--border); padding-top: 18px; margin-top: 22px; }
+  .stage { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 20px; }
   .stage:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
-  .stage-n { font-family: var(--font-mono); font-size: .72rem; color: var(--muted); letter-spacing: .06em; }
+  .stage h2 { margin: 0 0 12px; }
 
-  .row { padding: 11px 0; border-bottom: 1px solid var(--border); }
+  .row { padding: 10px 0; border-bottom: 1px solid var(--border); }
   .row:last-child { border-bottom: 0; }
-  .mono { font-family: var(--font-mono); font-size: .8rem; }
+  .mono { font-family: var(--font-mono); font-size: .79rem; }
 
   .chip {
-    display: inline-block; font-size: .73rem; font-weight: 600;
+    display: inline-block; font-size: .72rem; font-weight: 600;
     padding: 2px 8px; border-radius: 999px; margin: 3px 5px 0 0;
     border: 1px solid var(--border); color: var(--muted); font-family: var(--font-mono);
   }
@@ -253,21 +222,21 @@
   .verdict-protected { color: var(--held-ink); font-weight: 620; }
   .verdict-clean { color: var(--muted); font-weight: 620; }
 
-  .guard { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+  .guard { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
   .guard:last-child { border-bottom: 0; }
   .guard.idle { opacity: .5; }
-  .guard-id { font-family: var(--font-mono); font-size: .78rem; font-weight: 640; min-width: 34px; color: var(--muted); }
+  .guard-id { font-family: var(--font-mono); font-size: .77rem; font-weight: 640; min-width: 34px; color: var(--muted); }
   .guard.hit .guard-id { color: var(--text); }
   .guard-body { flex: 1; min-width: 0; }
-  .guard-title { font-size: .89rem; font-weight: 600; }
-  .guard-detail { font-size: .83rem; color: var(--muted); margin-top: 2px; }
+  .guard-title { font-size: .88rem; font-weight: 600; }
+  .guard-detail { font-size: .82rem; color: var(--muted); margin-top: 2px; }
 
-  .callout { border-left: 3px solid var(--border); padding: 2px 0 2px 14px; margin: 12px 0; font-size: .88rem; color: var(--muted); }
-  .callout.danger { border-color: var(--danger); color: var(--text); }
-  .callout.safe { border-color: var(--held-ink); }
+  .callout { border-left: 3px solid var(--border); padding: 2px 0 2px 13px; margin: 0 0 14px; font-size: .87rem; }
+  .callout.danger { border-color: var(--danger); }
+  .callout.safe { border-color: var(--held-ink); color: var(--muted); }
 
   details.more { margin-top: 10px; }
-  details.more summary { cursor: pointer; font-size: .85rem; color: var(--muted); }
+  details.more summary { cursor: pointer; font-size: .84rem; color: var(--muted); }
 
   @media (max-width: 560px) { .btn-row .btn { width: auto; flex: 1 1 auto; } }
 </style>
@@ -285,45 +254,23 @@
     <span class="brand-word">mailwarden</span>
   </a>
 
-  <h1 style="margin-top:26px">Watch it decide, before you trust it with anything.</h1>
-  <p class="lede">
-    Build a test inbox from the samples below, pick an action, and Mailwarden
-    shows its working — which words it redacts before storing anything, what the
-    classifier was allowed to see, and which guardrail held each message back.
-    No sign-in, no Google permissions, nothing of yours involved.
-  </p>
+  <h1 style="margin-top:24px">Try it on a test inbox</h1>
+  <p class="lede">Add mail, pick an action, see what Mailwarden would do.</p>
 
-  <div class="callout safe">
-    This is not a mock-up. The page calls the same classifier and the same
-    guardrail layer that run on a connected Gmail account — the one function
-    every mailbox change has to pass through. Whatever it prints is what the
-    code returned.
-  </div>
-
-  <!-- ── Step 1 ────────────────────────────────────────────────────── -->
   <section class="card">
-    <span class="step-label">Step 1</span>
-    <h2 style="margin-top:0">Put mail in the inbox</h2>
-    <p class="muted" style="margin-bottom:14px">
-      Add and remove whatever you like. The second group is the interesting one —
-      mail that looks like clutter and would be expensive to lose.
-    </p>
-
     <div class="panes">
       <div>
         <div class="pane-head">
-          <h3 style="margin:0">Sample emails</h3>
+          <h3>Samples</h3>
           <button class="mini" type="button" data-pick="all">Add all</button>
         </div>
-        <div class="pane-scroll" id="library">
-          <p class="muted">Loading samples…</p>
-        </div>
+        <div class="pane-scroll" id="library"></div>
       </div>
 
       <div>
         <div class="pane-head">
-          <h3 style="margin:0">Your test inbox <span id="inbox-count" class="muted"></span></h3>
-          <button class="mini" type="button" data-pick="none">Empty it</button>
+          <h3>Test inbox <span id="inbox-count" class="muted"></span></h3>
+          <button class="mini" type="button" data-pick="none">Empty</button>
         </div>
         <div class="pane-scroll" id="inbox" aria-live="polite"></div>
       </div>
@@ -332,34 +279,20 @@
     <div id="compose" class="compose"></div>
   </section>
 
-  <!-- ── Step 2 ────────────────────────────────────────────────────── -->
   <section class="card">
-    <span class="step-label">Step 2</span>
-    <h2 style="margin-top:0">Choose what to do with it</h2>
-
-    <div class="btn-row" style="margin:14px 0 6px">
-      <button class="btn" type="button" data-run="archive" data-evt="try_archive">Archive them</button>
-      <button class="btn ghost" type="button" data-run="trash" data-evt="try_trash">Move to trash</button>
+    <div class="btn-row">
+      <button class="btn" type="button" data-run="archive" data-evt="try_archive">Archive</button>
+      <button class="btn ghost" type="button" data-run="trash" data-evt="try_trash">Trash</button>
       <button class="btn ghost" type="button" data-run="delete" data-evt="try_delete">Delete permanently</button>
+      <span class="muted" id="selection-note"></span>
     </div>
-    <p class="muted" id="selection-note">Nothing in the inbox yet.</p>
-    <p class="muted">
-      The third button is real and it is meant to fail. Mailwarden asks Google
-      only for the permission that <em>cannot</em> permanently delete mail, and
-      the request is refused by the guard layer rather than hidden in the
-      interface. Press it and watch.
-    </p>
   </section>
 
-  <!-- ── Step 3 ────────────────────────────────────────────────────── -->
   <section id="result" class="hidden" aria-live="polite"></section>
 
-  <p class="muted" style="margin-top:40px; border-top:1px solid var(--border); padding-top:18px">
-    Convinced? <a href="/auth/google" data-evt="try_cta_signin">Connect your Gmail</a> —
-    free for 1,000 messages a month, and every action reversible for 30 days.
-    <br>
+  <p class="muted" style="margin-top:36px; border-top:1px solid var(--border); padding-top:16px">
+    <a href="/auth/google" data-evt="try_cta_signin">Connect your Gmail</a> ·
     <a href="/">Home</a> ·
-    <a href="/blog/">Writing</a> ·
     <a href="/pricing.html">Plans</a> ·
     <a href="/privacy.html">Privacy</a>
   </p>
