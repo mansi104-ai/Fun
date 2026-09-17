@@ -117,6 +117,45 @@
     padding: 26px 18px; text-align: center; color: var(--muted); font-size: .9rem;
   }
 
+  /* ── Compose ─────────────────────────────────────────────────────── */
+
+  .compose { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 18px; }
+
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+  .f { display: block; }
+  .f > span {
+    display: block; font-size: .8rem; color: var(--muted); margin-bottom: 4px;
+  }
+  .f input, .f select, .f textarea { margin: 0; }
+
+  .flags { border: 0; padding: 12px 0 0; margin: 0; }
+  .flags legend { padding: 0; }
+  .flag {
+    display: grid; grid-template-columns: 20px 1fr; gap: 9px;
+    align-items: start; font-size: .84rem; padding: 4px 0; cursor: pointer;
+  }
+  /* Checkboxes inherit the 100%-width input rule from brand.css otherwise. */
+  .flag input[type="checkbox"] {
+    width: 17px; height: 17px; min-height: 0; margin: 2px 0 0; padding: 0;
+    accent-color: var(--text);
+  }
+
+  /*
+   * The body field, set apart on purpose.
+   *
+   * The rule above it is the privacy boundary made visible: everything higher
+   * up is sent, this is not. A form that mixed it in with the rest would be
+   * making the same claim in a footnote nobody reads.
+   */
+  .stays {
+    margin-top: 14px; padding-top: 12px;
+    border-top: 2px dashed var(--held-ink);
+  }
+  .stays-tag {
+    color: var(--held-ink); font-weight: 660; font-size: .74rem;
+    letter-spacing: .03em; text-transform: uppercase;
+  }
+
   /* ── Redaction ───────────────────────────────────────────────────── */
 
   .redact-pair {
@@ -289,6 +328,8 @@
         <div class="pane-scroll" id="inbox" aria-live="polite"></div>
       </div>
     </div>
+
+    <div id="compose" class="compose"></div>
   </section>
 
   <!-- ── Step 2 ────────────────────────────────────────────────────── -->

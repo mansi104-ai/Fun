@@ -27,23 +27,23 @@
  * watches happen rather than something they read.
  */
 
-export interface SandboxMessage {
-  /** Stable id. The client sends these back and nothing else. */
+/**
+ * EXACTLY the fields the pipeline reads — the sandbox's equivalent of what
+ * Gmail hands us for one message under `format: "metadata"`.
+ *
+ * The split between this and `SandboxMessage` below is the privacy claim
+ * expressed as a type rather than a comment: `runSandbox` takes `InboxMessage`,
+ * so there is no body in scope for it to read even by accident. When a visitor
+ * writes their own test email on /try.html, the browser sends these fields and
+ * keeps the body it never had a reason to transmit.
+ */
+export interface InboxMessage {
+  /** Stable id, used to correlate the trace back to the browser's own copy. */
   id: string;
   senderKey: string;
   senderName: string;
-  /** Rendered in the picker, hashed and discarded on the way in. */
+  /** Read, hashed, and dropped — exactly as the Subject header is in sync.ts. */
   subject: string;
-  /**
-   * Prose that exists ONLY to be visibly withheld.
-   *
-   * `format: "metadata"` means Gmail never transfers a body to us at all, so
-   * there is nothing in the product for this to correspond to. It is served
-   * with the catalogue, shown in the sample card, and is conspicuously absent
-   * from the /api/demo/run response — which a sceptic can confirm in their own
-   * network tab. A claim someone can check beats a claim they have to accept.
-   */
-  body: string;
   /** Days before now. Anything under LIMITS.recencyProtectionDays trips G4. */
   ageDays: number;
   sizeKb: number;
@@ -57,6 +57,21 @@ export interface SandboxMessage {
   important?: boolean;
   /** Puts a SENT message in this message's thread, exactly as a real reply would. */
   youRepliedInThread?: boolean;
+  /** True for a message the visitor wrote themselves. Presentation only. */
+  custom?: boolean;
+}
+
+export interface SandboxMessage extends InboxMessage {
+  /**
+   * Prose that exists ONLY to be visibly withheld.
+   *
+   * `format: "metadata"` means Gmail never transfers a body to us at all, so
+   * there is nothing in the product for this to correspond to. It is served
+   * with the catalogue, shown in the sample card, and is conspicuously absent
+   * from the /api/demo/run response — which a sceptic can confirm in their own
+   * network tab. A claim someone can check beats a claim they have to accept.
+   */
+  body: string;
   /**
    * One line for the picker. Says what KIND of mail this is — never what
    * Mailwarden will decide. A card that pre-announces the verdict turns the
@@ -289,15 +304,141 @@ export const SANDBOX_INBOX: SandboxMessage[] = [
 const BY_ID = new Map(SANDBOX_INBOX.map((m) => [m.id, m]));
 
 /**
+ * Ceilings for visitor-written messages.
+ *
+ * The endpoint takes no credential, so these numbers are its entire abuse
+ * story. They are generous for a person trying the demo and uninteresting for
+ * anyone trying to use it as free compute: the work is O(messages) in-memory
+ * with no model call, no database write and no outbound request, so the only
+ * resource on the table is a few milliseconds of CPU.
+ */
+export const CUSTOM_LIMITS = {
+  maxCustom: 10,
+  /** Catalogue picks plus custom messages. */
+  maxTotal: 30,
+  maxSubject: 300,
+  maxSenderKey: 200,
+  maxName: 120,
+  maxAgeDays: 5_000,
+  maxSizeKb: 50_000,
+  maxLabels: 2,
+} as const;
+
+/**
+ * The only labels a visitor may set.
+ *
+ * This allowlist is load-bearing, not tidiness. `labels` flows into the
+ * guard layer, where `SENT` means "the user wrote this" and `TRASH` and
+ * `INBOX` decide which messages an action can even touch. A free-text label
+ * field would let a crafted request mark its own message as sent mail and
+ * watch the reply guards fire on a fiction — the demo would be lying, and it
+ * would be the visitor's own input doing it.
+ *
+ * Every other label the pipeline sees is derived from a boolean below.
+ */
+const SETTABLE_LABELS = new Set([
+  "CATEGORY_PROMOTIONS",
+  "CATEGORY_SOCIAL",
+  "CATEGORY_UPDATES",
+  "CATEGORY_FORUMS",
+  "CATEGORY_PERSONAL",
+]);
+
+/** Permissive but closed: a local part, an @, and a dotted domain. */
+const EMAIL = /^[^\s@,;<>"]{1,64}@[^\s@.,;<>"]{1,63}(?:\.[^\s@.,;<>"]{1,63})+$/;
+
+/** Ids the client assigns to its own drafts. Namespaced so they cannot shadow a sample. */
+const CUSTOM_ID = /^custom-[A-Za-z0-9]{1,24}$/;
+
+/**
+ * Control characters become spaces before anything else happens. They have no
+ * business in a header value, and a newline inside one is the shape of every
+ * header-injection bug ever written. Nothing here builds a real message, but a
+ * sanitiser that is only safe because of what the code happens not to do yet
+ * is not a sanitiser.
+ */
+/**
+ * Control characters become spaces before anything else happens. They have no
+ * business in a header value, and a newline inside one is the shape of every
+ * header-injection bug ever written. Nothing here builds a real message, but a
+ * sanitiser that is only safe because of what the surrounding code happens not
+ * to do yet is not a sanitiser.
+ */
+const str = (v: unknown, max: number): string =>
+  typeof v === "string"
+    ? v.replace(/[\x00-\x1f\x7f]/g, " ").trim().slice(0, max)
+    : "";
+
+const bool = (v: unknown): boolean => v === true;
+
+const num = (v: unknown, min: number, max: number, fallback: number): number => {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+};
+
+/**
+ * Validates visitor-written messages into the same shape the catalogue uses.
+ *
+ * Note what is absent: a body. The client does not send one and this function
+ * could not accept one — which is the whole point of letting people write
+ * their own test mail. They can put a password in the body on /try.html, watch
+ * it get redacted, and confirm in their network tab that it was never in the
+ * request to begin with.
+ *
+ * Anything malformed is dropped rather than rejected. A visitor experimenting
+ * with the form should get a result, not a validation essay; the fields that
+ * survive are shown back to them in the trace, so a dropped one is visible.
+ */
+export function parseCustom(input: unknown, seen: Set<string>): InboxMessage[] {
+  if (!Array.isArray(input)) return [];
+  const out: InboxMessage[] = [];
+
+  for (const raw of input.slice(0, CUSTOM_LIMITS.maxCustom)) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const m = raw as Record<string, unknown>;
+
+    const id = str(m.id, 40);
+    if (!CUSTOM_ID.test(id) || seen.has(id)) continue;
+
+    const senderKey = str(m.senderKey, CUSTOM_LIMITS.maxSenderKey).toLowerCase();
+    if (!EMAIL.test(senderKey)) continue;
+
+    const labels = Array.isArray(m.labels)
+      ? [...new Set(m.labels.filter((l): l is string => typeof l === "string" && SETTABLE_LABELS.has(l)))]
+          .slice(0, CUSTOM_LIMITS.maxLabels)
+      : [];
+
+    seen.add(id);
+    out.push({
+      id,
+      senderKey,
+      senderName: str(m.senderName, CUSTOM_LIMITS.maxName) || senderKey,
+      subject: str(m.subject, CUSTOM_LIMITS.maxSubject),
+      ageDays: num(m.ageDays, 0, CUSTOM_LIMITS.maxAgeDays, 30),
+      sizeKb: num(m.sizeKb, 1, CUSTOM_LIMITS.maxSizeKb, 50),
+      labels,
+      unread: bool(m.unread),
+      hasUnsubscribe: bool(m.hasUnsubscribe),
+      starred: bool(m.starred),
+      hasAttachment: bool(m.hasAttachment),
+      important: bool(m.important),
+      youRepliedInThread: bool(m.youRepliedInThread),
+      custom: true,
+    });
+  }
+  return out;
+}
+
+/**
  * Resolves ids to messages, dropping anything unrecognised.
  *
  * The cap is the endpoint's whole abuse story: it is unauthenticated, so the
  * only thing standing between it and a CPU-burning payload is that the work is
  * bounded by a catalogue the caller cannot add to. Duplicate ids collapse.
  */
-export function resolve(ids: unknown): SandboxMessage[] {
+export function resolve(ids: unknown, seen = new Set<string>()): SandboxMessage[] {
   if (!Array.isArray(ids)) return [];
-  const seen = new Set<string>();
   const out: SandboxMessage[] = [];
   for (const id of ids.slice(0, SANDBOX_INBOX.length)) {
     if (typeof id !== "string" || seen.has(id)) continue;
@@ -307,4 +448,18 @@ export function resolve(ids: unknown): SandboxMessage[] {
     out.push(msg);
   }
   return out;
+}
+
+/**
+ * The full inbox for one request: catalogue picks plus whatever the visitor
+ * wrote themselves, de-duplicated across both and capped as a whole.
+ *
+ * The shared `seen` set is what stops a crafted request from pairing a sample
+ * id with a custom message claiming the same id — two rows for one message
+ * would double its weight in every per-sender count the classifier reads.
+ */
+export function buildInbox(ids: unknown, custom: unknown): InboxMessage[] {
+  const seen = new Set<string>();
+  const picked: InboxMessage[] = resolve(ids, seen);
+  return [...picked, ...parseCustom(custom, seen)].slice(0, CUSTOM_LIMITS.maxTotal);
 }

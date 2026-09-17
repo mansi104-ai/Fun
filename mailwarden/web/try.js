@@ -51,10 +51,44 @@ const ago = (ts, now) => {
 };
 
 let LIBRARY = [];
-/** Insertion-ordered, so the inbox reads in the order the visitor built it. */
+let LIMITS = { maxCustom: 10, maxTotal: 30, maxSubject: 300 };
+
+/** Catalogue picks, insertion-ordered so the inbox reads as it was built. */
 const inbox = new Set();
 
-const byId = (id) => LIBRARY.find((m) => m.id === id);
+/**
+ * Messages the visitor wrote, keyed by id.
+ *
+ * Each carries a `body`, and that body NEVER goes into a request — `payload()`
+ * below strips it. That is not an optimisation; it is the claim this page
+ * makes, in the one place a reader can test it. Type a password into the body
+ * field, run it, and the network tab shows the field was never sent.
+ */
+const drafts = new Map();
+
+let draftSeq = 0;
+
+const byId = (id) => drafts.get(id) ?? LIBRARY.find((m) => m.id === id);
+
+/** Everything in the test inbox, samples and drafts, in build order. */
+const inboxItems = () => [...[...inbox].map(byId), ...drafts.values()].filter(Boolean);
+
+/** Exactly the fields Gmail would hand the server. Note the absent body. */
+const payload = (d) => ({
+  id: d.id,
+  senderKey: d.senderKey,
+  senderName: d.senderName,
+  subject: d.subject,
+  ageDays: d.ageDays,
+  sizeKb: d.sizeKb,
+  labels: d.labels,
+  unread: d.unread,
+  hasUnsubscribe: d.hasUnsubscribe,
+  starred: d.starred,
+  hasAttachment: d.hasAttachment,
+  important: d.important,
+  youRepliedInThread: d.youRepliedInThread,
+});
 
 // ── Step 1: the library and the inbox ────────────────────────────────────
 
@@ -98,14 +132,127 @@ function inboxCard(m) {
     <div class="mail">
       <span>
         <span class="line mail-from">${esc(m.senderName)}
-          <span class="mail-meta"> · ${esc(m.senderKey)}</span></span>
-        <span class="line mail-subject">${esc(m.subject)}</span>
-        <span class="line mail-body">${esc(m.body)}</span>
+          <span class="mail-meta"> · ${esc(m.senderKey)}</span>
+          ${m.custom ? `<span class="tag">YOURS</span>` : ""}</span>
+        <span class="line mail-subject">${esc(m.subject) || "<em>(no subject)</em>"}</span>
+        ${m.body ? `<span class="line mail-body">${esc(m.body)}</span>` : ""}
         <span class="line">${tagsFor(m).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</span>
       </span>
       <button class="mini" type="button" data-remove="${esc(m.id)}"
-              aria-label="Remove ${esc(m.subject)} from the test inbox">Remove</button>
+              aria-label="Remove ${esc(m.subject || "untitled message")} from the test inbox">Remove</button>
     </div>`;
+}
+
+/**
+ * The compose form.
+ *
+ * Its field list is not arbitrary — it is precisely the metadata Gmail returns
+ * under `format: "metadata"`, which makes the form itself a statement of what
+ * Mailwarden can see. The body sits below a rule, marked as staying put,
+ * because it is the one field with no counterpart in the real read.
+ */
+const CATEGORIES = [
+  ["", "None — Primary tab"],
+  ["CATEGORY_PROMOTIONS", "Promotions"],
+  ["CATEGORY_SOCIAL", "Social"],
+  ["CATEGORY_UPDATES", "Updates"],
+  ["CATEGORY_FORUMS", "Forums"],
+];
+
+const FLAGS = [
+  ["unread", "Unread", "Bulk mail you never open is the strongest cleanup signal."],
+  ["hasUnsubscribe", "Has a List-Unsubscribe header", "Bulk mail carries one; security mail essentially never does."],
+  ["starred", "Starred", "G9 — never touched, whatever else is true."],
+  ["hasAttachment", "Has an attachment", "G11 — archived rather than trashed."],
+  ["important", "Gmail marked it Important", "G12 — archived rather than trashed."],
+  ["youRepliedInThread", "You replied in this thread", "G8 and G10 — the strongest protection there is."],
+];
+
+function composeForm() {
+  return `
+    <h3 style="margin:0 0 2px">Write your own</h3>
+    <p class="muted" style="margin-bottom:12px">
+      These are exactly the fields Gmail gives Mailwarden for one message —
+      nothing more is available to it. Fill them however you like and watch what
+      the rules make of it.
+    </p>
+
+    <div class="form-grid">
+      <label class="f"><span>From (name)</span>
+        <input id="d-name" type="text" placeholder="Acme Deals" maxlength="120"></label>
+      <label class="f"><span>From (address)</span>
+        <input id="d-email" type="text" placeholder="deals@acme.com" maxlength="200"
+               inputmode="email" autocomplete="off"></label>
+      <label class="f"><span>Subject</span>
+        <input id="d-subject" type="text" placeholder="50% off everything"
+               maxlength="${LIMITS.maxSubject}"></label>
+      <label class="f"><span>Gmail tab</span>
+        <select id="d-cat">
+          ${CATEGORIES.map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join("")}
+        </select></label>
+      <label class="f"><span>Days old</span>
+        <input id="d-age" type="number" value="90" min="0" max="5000"></label>
+      <label class="f"><span>Size (KB)</span>
+        <input id="d-size" type="number" value="80" min="1" max="50000"></label>
+    </div>
+
+    <fieldset class="flags">
+      <legend class="muted" style="font-size:.8rem">Headers and flags</legend>
+      ${FLAGS.map(([k, label, why]) => `
+        <label class="flag">
+          <input type="checkbox" data-flag="${k}" ${k === "unread" ? "checked" : ""}>
+          <span><b>${esc(label)}</b><span class="muted"> — ${esc(why)}</span></span>
+        </label>`).join("")}
+    </fieldset>
+
+    <div class="stays">
+      <label class="f"><span>Body <b class="stays-tag">stays in your browser</b></span>
+        <textarea id="d-body" rows="3"
+          placeholder="Type anything here — a password, if you like. It is not sent."></textarea></label>
+      <p class="muted" style="margin:6px 0 0;font-size:.82rem">
+        This field is never put into the request. Everything above it is, because
+        Gmail hands Mailwarden those headers; a body it never transfers at all.
+        Open your network tab before you press Add, then check
+        <code>/api/demo/run</code> — the body will not be there.
+      </p>
+    </div>
+
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn" type="button" id="draft-add">Add to inbox</button>
+      <span class="muted" id="draft-error" role="alert"></span>
+    </div>
+    <p class="muted" id="draft-limit" style="margin:6px 0 0"></p>`;
+}
+
+/** Reads the form. Returns null with a message when the one required field is bad. */
+function readDraft() {
+  const val = (id) => (document.getElementById(id)?.value ?? "").trim();
+  const email = val("d-email").toLowerCase();
+
+  // Mirrors the server's EMAIL check. The server is the authority — this only
+  // exists so a typo is a sentence under the button, not a silently dropped row.
+  if (!/^[^\s@,;<>"]{1,64}@[^\s@.,;<>"]{1,63}(?:\.[^\s@.,;<>"]{1,63})+$/.test(email)) {
+    return { error: "Give the sender a plausible email address — that is what every rule keys off." };
+  }
+
+  const cat = val("d-cat");
+  const flags = {};
+  for (const el of document.querySelectorAll("[data-flag]")) flags[el.dataset.flag] = el.checked;
+
+  return {
+    draft: {
+      id: `custom-${++draftSeq}${Math.random().toString(36).slice(2, 8)}`,
+      senderKey: email,
+      senderName: val("d-name") || email,
+      subject: val("d-subject"),
+      body: val("d-body"),
+      ageDays: Math.max(0, Math.min(5000, Number(val("d-age")) || 0)),
+      sizeKb: Math.max(1, Math.min(50000, Number(val("d-size")) || 1)),
+      labels: cat ? [cat] : [],
+      ...flags,
+      custom: true,
+    },
+  };
 }
 
 function renderLibrary() {
@@ -120,21 +267,37 @@ function renderLibrary() {
 }
 
 function renderInbox() {
-  const items = [...inbox].map(byId).filter(Boolean);
+  const items = inboxItems();
   document.getElementById("inbox").innerHTML = items.length
     ? `<div class="mail-list">${items.map(inboxCard).join("")}</div>`
-    : `<p class="empty">Empty. Add a few samples on the left — the full body text
-         is shown here, so you can see exactly what gets redacted next.</p>`;
+    : `<p class="empty">Empty — add samples from the left, or write your own
+         below. Whatever lands here shows its full body text, so you can see
+         exactly what gets redacted when you run it.</p>`;
 
-  const n = inbox.size;
+  const n = items.length;
   document.getElementById("inbox-count").textContent = n ? `(${fmt.format(n)})` : "";
   document.getElementById("selection-note").textContent = n === 0
-    ? "Nothing in the inbox yet."
+    ? "Nothing in the inbox yet — add a message above."
     : `${fmt.format(n)} ${plural(n, "message", "messages")} ready.`;
   for (const b of document.querySelectorAll("[data-run]")) b.disabled = n === 0;
+
+  const addBtn = document.getElementById("draft-add");
+  if (addBtn) {
+    const full = drafts.size >= LIMITS.maxCustom;
+    addBtn.disabled = full;
+    document.getElementById("draft-limit").textContent = full
+      ? `That's the limit of ${fmt.format(LIMITS.maxCustom)} custom messages. Remove one to add another.`
+      : "";
+  }
 }
 
-const renderPanes = () => { renderLibrary(); renderInbox(); };
+function renderCompose() {
+  const el = document.getElementById("compose");
+  // Rendered once: re-rendering on every add would wipe a half-typed draft.
+  if (el && !el.dataset.ready) { el.innerHTML = composeForm(); el.dataset.ready = "1"; }
+}
+
+const renderPanes = () => { renderLibrary(); renderInbox(); renderCompose(); };
 
 // ── Charts ───────────────────────────────────────────────────────────────
 
@@ -251,8 +414,10 @@ function stageRedaction(t) {
               <span class="verdict-note">Read, salted-hashed, plaintext dropped. Counts repeated templates; reads back as nothing.</span>
             </span></div>
           <div class="field"><span class="field-k">Body</span>
-            <span class="field-v">${redactionBar(m.body, 60)}
-              <span class="verdict-note">Never requested. <code>format: ${esc(r.fetchFormat)}</code> cannot return one.</span>
+            <span class="field-v">${m.body ? redactionBar(m.body, 60) : `<span class="verdict-note">(none)</span>`}
+              <span class="verdict-note">${m.custom
+                ? "You typed this, and it never left your browser — it was not in the request that produced this page."
+                : `Never requested. <code>format: ${esc(r.fetchFormat)}</code> cannot return one.`}</span>
             </span></div>
           <div class="field"><span class="field-k">Envelope</span>
             <span class="field-v mono">${esc(row.labels)} · ${esc(kb(row.sizeBytes))} · ${esc(ago(row.internalDate, t.now))}</span></div>
@@ -458,7 +623,7 @@ async function run(action, confirmed) {
   try {
     renderTrace(await api("/api/demo/run", {
       method: "POST",
-      body: { ids: [...inbox], action, confirmed },
+      body: { ids: [...inbox], custom: [...drafts.values()].map(payload), action, confirmed },
     }));
   } catch (err) {
     el.innerHTML = `<p class="callout danger">Could not run the demo: ${esc(err.message)}</p>`;
@@ -470,12 +635,29 @@ document.addEventListener("click", (e) => {
   if (add) { inbox.add(add.dataset.add); return void renderPanes(); }
 
   const remove = e.target.closest("[data-remove]");
-  if (remove) { inbox.delete(remove.dataset.remove); return void renderPanes(); }
+  if (remove) {
+    inbox.delete(remove.dataset.remove);
+    drafts.delete(remove.dataset.remove);
+    return void renderPanes();
+  }
+
+  if (e.target.closest("#draft-add")) {
+    const { draft, error } = readDraft();
+    const slot = document.getElementById("draft-error");
+    if (error) { slot.textContent = error; return; }
+    slot.textContent = "";
+    drafts.set(draft.id, draft);
+    for (const id of ["d-name", "d-email", "d-subject", "d-body"]) {
+      const f = document.getElementById(id);
+      if (f) f.value = "";
+    }
+    return void renderInbox();
+  }
 
   const pick = e.target.closest("[data-pick]");
   if (pick) {
-    inbox.clear();
-    if (pick.dataset.pick === "all") for (const m of LIBRARY) inbox.add(m.id);
+    if (pick.dataset.pick === "all") { for (const m of LIBRARY) inbox.add(m.id); }
+    else { inbox.clear(); drafts.clear(); }
     return void renderPanes();
   }
 
@@ -492,10 +674,10 @@ document.addEventListener("click", (e) => {
 api("/api/demo/inbox")
   .then((data) => {
     LIBRARY = data.messages;
-    // Open on the interesting case rather than an empty inbox: a visitor who has
-    // to assemble a batch before seeing anything mostly leaves instead. They can
-    // still empty it and build their own.
-    for (const m of LIBRARY) inbox.add(m.id);
+    if (data.limits) LIMITS = { ...LIMITS, ...data.limits };
+    // Deliberately starts EMPTY. A pre-filled inbox answers the question before
+    // the visitor has asked it, and the point of the page is that they choose
+    // what goes in — including mail they write themselves.
     renderPanes();
   })
   .catch(() => {

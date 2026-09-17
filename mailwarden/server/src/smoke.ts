@@ -47,7 +47,13 @@ import {
   refundMessagesCleaned,
   setPlan,
 } from "./lib/entitlements.js";
-import { SANDBOX_INBOX, resolve as resolveSandbox } from "./sandbox/catalog.js";
+import {
+  CUSTOM_LIMITS,
+  SANDBOX_INBOX,
+  buildInbox,
+  parseCustom,
+  resolve as resolveSandbox,
+} from "./sandbox/catalog.js";
 import { GUARDS, runSandbox } from "./sandbox/run.js";
 import { DAY_MS, LIMITS } from "./safety/limits.js";
 import {
@@ -1812,6 +1818,102 @@ section("22. Public sandbox: the demo runs the real pipeline");
 
   // Unauthenticated endpoint: the fixed catalogue IS the rate limit, so
   // resolve() has to stay closed to anything not already in it.
+  /**
+   * VISITOR-WRITTEN MAIL.
+   *
+   * /try.html lets anyone compose a test message, so `parseCustom` is the whole
+   * trust boundary for an endpoint that takes no credential. The label
+   * allowlist is the sharp edge: `labels` reaches the guard layer, where SENT
+   * means "the user wrote this" and INBOX/TRASH decide what an action may touch.
+   */
+  const custom = (over: Record<string, unknown> = {}): unknown[] => [
+    {
+      id: "custom-a1", senderKey: "deals@acme.com", senderName: "Acme",
+      subject: "Half price everything", ageDays: 200, sizeKb: 90,
+      labels: ["CATEGORY_PROMOTIONS"], unread: true, hasUnsubscribe: true, ...over,
+    },
+  ];
+
+  check("A well-formed custom message is accepted",
+    parseCustom(custom(), new Set()).length === 1);
+
+  for (const [label, bad] of [
+    ["a missing address", { senderKey: undefined }],
+    ["an address with no domain dot", { senderKey: "deals@acme" }],
+    ["an address with a space", { senderKey: "de als@acme.com" }],
+    ["an id outside the custom namespace", { id: "groupon-1" }],
+    ["an id that is not an id at all", { id: "../../etc" }],
+  ] as [string, Record<string, unknown>][]) {
+    check(`Custom message rejected for ${label}`,
+      parseCustom(custom(bad), new Set()).length === 0);
+  }
+
+  // The label allowlist. A crafted request must not be able to declare its own
+  // message as sent mail, or as already trashed.
+  const smuggled = parseCustom(
+    custom({ labels: ["SENT", "TRASH", "INBOX", "STARRED", "CATEGORY_PROMOTIONS"] }),
+    new Set(),
+  );
+  check("Custom labels are filtered to the settable allowlist",
+    smuggled.length === 1 && smuggled[0]!.labels.join(",") === "CATEGORY_PROMOTIONS",
+    smuggled[0]?.labels.join(","));
+
+  // A smuggled SENT label would have made the sandbox report reply protection
+  // on a sender the visitor invented. Check the end-to-end consequence, not
+  // just the filter.
+  const smuggleRun = runSandbox(
+    parseCustom(custom({ labels: ["SENT"], hasUnsubscribe: true, unread: true }), new Set()),
+    "archive", true,
+  );
+  check("…so a smuggled SENT label cannot fake reply protection",
+    smuggleRun.senders.every((s) => s.facts.userReplied === false));
+
+  // Numeric clamps, so a hostile age or size cannot produce absurd arithmetic.
+  const clamped = parseCustom(
+    custom({ ageDays: 9e9, sizeKb: -5, subject: "x".repeat(5000) }), new Set(),
+  )[0]!;
+  check("Custom ageDays is clamped", clamped.ageDays === CUSTOM_LIMITS.maxAgeDays, String(clamped.ageDays));
+  check("Custom sizeKb has a floor of 1", clamped.sizeKb === 1, String(clamped.sizeKb));
+  check("Custom subject is truncated",
+    clamped.subject.length === CUSTOM_LIMITS.maxSubject, String(clamped.subject.length));
+
+  // Control characters are the shape of header injection. Nothing here builds a
+  // real message, but the sanitiser should not depend on that staying true.
+  const ctl = parseCustom(
+    custom({ senderName: `Acme${String.fromCharCode(13, 10)}Bcc: victim@example.com` }),
+    new Set(),
+  )[0]!;
+  check("Control characters are stripped from custom text",
+    !/[\x00-\x1f\x7f]/.test(ctl.senderName), JSON.stringify(ctl.senderName));
+
+  check("Custom messages are capped",
+    parseCustom(
+      Array.from({ length: 200 }, (_, i) => custom({ id: `custom-n${i}` })[0]),
+      new Set(),
+    ).length === CUSTOM_LIMITS.maxCustom);
+
+  // Ids are shared across both sources, so a custom message cannot duplicate a
+  // sample and give one sender twice its real weight.
+  const both = buildInbox(["groupon-1"], custom({ id: "groupon-1" }));
+  check("A custom message cannot reuse a sample's id", both.length === 1, `${both.length} rows`);
+
+  check("The combined inbox is capped",
+    buildInbox(
+      SANDBOX_INBOX.map((m) => m.id),
+      Array.from({ length: 50 }, (_, i) => custom({ id: `custom-z${i}` })[0]),
+    ).length <= CUSTOM_LIMITS.maxTotal);
+
+  // The whole point of the compose form: the pipeline's input type has no body,
+  // so a body cannot be accepted even if a client sends one.
+  const withBody = parseCustom(custom({ body: "my banking password is hunter2" }), new Set())[0]!;
+  check("A body sent by a client is not carried into the pipeline",
+    !JSON.stringify(withBody).includes("hunter2"), JSON.stringify(withBody).slice(0, 80));
+
+  const customTrace = runSandbox(parseCustom(custom(), new Set()), "archive", true);
+  check("A visitor's own message runs the real classifier",
+    customTrace.senders.length === 1 && customTrace.senders[0]!.verdict.category.length > 0,
+    customTrace.senders[0]?.verdict.category);
+
   check("Catalogue resolve ignores unknown ids", resolveSandbox(["nope", "groupon-1"]).length === 1);
   check("Catalogue resolve collapses duplicates",
     resolveSandbox(["groupon-1", "groupon-1"]).length === 1);

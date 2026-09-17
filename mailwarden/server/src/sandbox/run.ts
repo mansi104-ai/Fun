@@ -14,7 +14,7 @@ import {
   type GuardContext,
   type SenderRow,
 } from "../safety/policy.js";
-import type { SandboxMessage } from "./catalog.js";
+import type { InboxMessage } from "./catalog.js";
 
 /**
  * THE SANDBOX PIPELINE — the real thing, over a made-up inbox.
@@ -70,7 +70,7 @@ export interface IngestedRow {
  * thread, because that is how a reply is visible to us: we never see "the user
  * replied", we see a message of theirs sitting in the thread.
  */
-function ingest(picked: SandboxMessage[], now: number): IngestedRow[] {
+function ingest(picked: InboxMessage[], now: number): IngestedRow[] {
   const rows: IngestedRow[] = [];
 
   for (const m of picked) {
@@ -333,7 +333,7 @@ function eligible(rows: IngestedRow[], action: string): IngestedRow[] {
   return inbound;
 }
 
-const toCandidate = (r: IngestedRow, picked: Map<string, SandboxMessage>): CandidateMessage => ({
+const toCandidate = (r: IngestedRow, picked: Map<string, InboxMessage>): CandidateMessage => ({
   message_id: r.id,
   sender_key: r.senderKey,
   labels: r.labels,
@@ -344,7 +344,7 @@ const toCandidate = (r: IngestedRow, picked: Map<string, SandboxMessage>): Candi
 });
 
 export function runSandbox(
-  picked: SandboxMessage[],
+  picked: InboxMessage[],
   action: string,
   confirmed: boolean,
 ): SandboxTrace {
