@@ -1,0 +1,61 @@
+database design 
+- user
+- games
+- gameMember
+- friends
+
+model user{
+  id
+  email
+  password
+  username
+
+  gamesMembers.   GameMembers[]
+  friends.   Friends[]
+
+}
+
+model game{
+  id
+  timelimit (60 seconds)
+  startTime (date)
+  questions Question[]
+  questionAnswer[]
+  members. Members[]
+
+}
+
+model GameMember{
+  id
+  userId
+  gameId
+
+}
+
+model friends{
+  senderId
+  receiverId
+  status : *Accepted*| *Rejected* | *pending*
+}
+
+model question{
+  id
+  operation 1 : number
+    operation 2 : number 
+    sign: "+"|"-" | "*" | "/"
+    gameId : string
+
+}
+
+model questionAnswer{
+  id
+  questionId
+  gameId
+}
+
+model UserRating{
+  id
+  userId
+  rating: number /float
+  
+}

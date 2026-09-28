@@ -7,7 +7,7 @@ import openpyxl
 import pandas as pd
 import streamlit as st
 
-from ocr_table import extract_table_from_image, tesseract_ready
+from ocr_table import extract_table_from_image, model_ready
 
 # ---------------------------------------------------------------------------
 # Persistent storage (plain files on disk next to this script -> survives
@@ -114,17 +114,21 @@ def append_blocks(excel_path, df):
     groups = df.groupby(group_key, sort=False) if group_key else [("edited rows", df)]
 
     for image_name, group in groups:
-        rows = []
-        for _, r in group[data_cols].iterrows():
+        rows, partial = [], []
+        for n, (_, r) in enumerate(group[data_cols].iterrows(), start=1):
             values = row_values(r.tolist())
-            if values:
+            if len(values) == DATA_COL_COUNT:
                 rows.append(values)
+            elif values:
+                # Short of a full row: usually one cell blanked or mistyped in
+                # the review table. Named individually so it can be found.
+                partial.append(f"row {n} has {len(values)} of {DATA_COL_COUNT}")
 
-        if not rows:
-            skipped.append((image_name, "no numeric values found"))
-            continue
         if len(rows) != ROWS_PER_IMAGE:
-            skipped.append((image_name, f"{len(rows)} rows, expected {ROWS_PER_IMAGE}"))
+            reason = f"{len(rows)} complete rows, expected {ROWS_PER_IMAGE}"
+            if partial:
+                reason += " (" + "; ".join(partial) + ")"
+            skipped.append((image_name, reason))
             continue
 
         start = next_block_row(ws)
@@ -152,28 +156,18 @@ def read_data_block(excel_path):
 
 
 st.set_page_config(page_title="Table OCR to Excel", layout="wide")
-st.title("Image Table OCR -> Excel")
+st.title("SCL Table -> Excel")
 st.caption(
-    "Upload an Excel file and a folder of table screenshots. "
-    "Extracted table data (with the source image name) is written into the "
-    "Excel file. Everything is saved on disk, so it's still here next time "
-    "you open the app."
+    "Upload your reference Excel file and your SCL screenshots. Each table is "
+    "read by a vision model and written into columns C:M of the first "
+    "worksheet, six rows per image with one blank row between. The workbook is "
+    "edited in place and kept on disk, so it is still here next time."
 )
 
-# Tesseract is a system binary, not a Python package, so requirements.txt
-# cannot supply it. Fail here with an explanation rather than part-way through
-# OCR with a traceback.
-if tesseract_ready() is None:
-    st.error(
-        "**Tesseract OCR is not installed on this machine, so images cannot be read.**\n\n"
-        "*Deployed on Streamlit Community Cloud:* `packages.txt` must sit in the "
-        "**root of the repository** — unlike `requirements.txt`, Cloud does not "
-        "search upwards from the app file for it. There is one at the repo root "
-        "listing `tesseract-ocr`; reboot the app from *Manage app* so it reinstalls.\n\n"
-        "*Running locally:* `sudo apt-get install -y tesseract-ocr` on Linux, "
-        "`brew install tesseract` on macOS, or the installer from "
-        "https://github.com/UB-Mannheim/tesseract/wiki on Windows."
-    )
+# Stop here with an explanation rather than failing on the first screenshot.
+_missing = model_ready()
+if _missing:
+    st.error(_missing)
     st.stop()
 
 log = load_log()
@@ -258,34 +252,62 @@ if "targets_this_run" not in st.session_state:
 
 if run_new or run_all:
     targets = stored_images if run_all else unprocessed
-    frames = []
-    progress = st.progress(0.0, text="Running OCR...")
+    frames, failures, suspect = [], [], []
+    progress = st.progress(0.0, text="Reading tables...")
     for i, img_path in enumerate(targets):
-        df = extract_table_from_image(str(img_path))
-        if not df.empty:
-            df.insert(0, "Source Image", img_path.name)
-            df.insert(1, "Extracted At", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            frames.append(df)
-        progress.progress((i + 1) / len(targets), text=f"OCR: {img_path.name}")
+        progress.progress(i / len(targets), text=f"Reading {img_path.name}...")
+        try:
+            df, title, problems = extract_table_from_image(str(img_path))
+        except Exception as e:
+            failures.append((img_path.name, str(e)))
+            continue
+        df.insert(0, "Source Image", img_path.name)
+        df.insert(1, "Extracted At", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        frames.append(df)
+        if problems:
+            suspect.append((img_path.name, title, problems))
     progress.empty()
 
     if frames:
         st.session_state.preview_df = pd.concat(frames, ignore_index=True)
-        st.session_state.targets_this_run = [p.name for p in targets]
-        st.success(
-            f"Extracted data from {len(frames)}/{len(targets)} image(s). "
-            "Review below, then save."
-        )
+        # Only images that produced a table are eligible to be marked done.
+        st.session_state.targets_this_run = [
+            p.name for p in targets if p.name not in {n for n, _ in failures}
+        ]
+        st.success(f"Read {len(frames)} of {len(targets)} image(s). Review below, then save.")
     else:
-        st.warning("No table data could be detected in the selected images.")
         st.session_state.preview_df = None
+
+    if failures:
+        st.error(
+            "Could not read these:\n\n"
+            + "\n".join(f"- **{name}**: {why}" for name, why in failures)
+        )
+
+    # These checks are properties of stress linearization, not of one workbook,
+    # so a failure means a number is wrong rather than that the model is
+    # unusual. Shown as a warning so the value can be corrected below before it
+    # reaches the sheet.
+    if suspect:
+        st.warning(
+            "**Some numbers fail the consistency checks** — Membrane should equal "
+            "Membrane+Bending (Center), and Bending (Inside) should be the negative "
+            "of Bending (Outside). Check these against the screenshot before saving:"
+        )
+        for name, title, problems in suspect:
+            with st.expander(f"{name}{f'  ({title})' if title else ''} — {len(problems)} issue(s)"):
+                for p in problems:
+                    st.write(f"- {p}")
 
 # ---------------------------------------------------------------------------
 # 4. Review + save into Excel
 # ---------------------------------------------------------------------------
 if st.session_state.preview_df is not None:
     st.subheader("Review extracted data before saving")
-    st.caption("OCR isn't perfect — fix any misread cells here before saving.")
+    st.caption(
+        "Check the numbers against your screenshots and correct anything wrong "
+        "here — this is the last point before they reach the workbook."
+    )
     edited = st.data_editor(
         st.session_state.preview_df, use_container_width=True, num_rows="dynamic"
     )

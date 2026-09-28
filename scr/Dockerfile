@@ -3,19 +3,14 @@
 FROM python:3.12-slim
 WORKDIR /app
 
-# Tesseract is the OCR engine pytesseract shells out to -- a system binary, not
-# a Python package, which is why requirements.txt alone leaves the app able to
-# import pytesseract and unable to read a single image. tesseract-ocr-eng is the
-# English language data; it comes in as a dependency today, but naming it stops
-# a future repackaging leaving an OCR engine with no model.
+# Tables are read by a vision model over HTTPS, so there is no OCR engine and
+# no OpenCV to install -- the Tesseract and libglib packages this image used to
+# carry are gone with them.
 #
-# libglib2.0-0 is what opencv-python-headless still links against. The headless
-# wheel is chosen precisely to avoid the much heavier libGL/GUI stack.
-#
-# gosu lets the entrypoint drop privileges after fixing the volume's ownership.
+# gosu is all that remains: the entrypoint uses it to drop privileges after
+# fixing the volume's ownership.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      tesseract-ocr tesseract-ocr-eng libglib2.0-0 gosu \
+ && apt-get install -y --no-install-recommends gosu \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./

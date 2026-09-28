@@ -1,0 +1,6 @@
+Python basics
+Learnt till now:
+Data structures like string, list, tuple, structures
+Exception handling 
+OOPS concepts
+Comprehensions
