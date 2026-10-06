@@ -1,5 +1,5 @@
 """
-SCL screenshots -> the C:M columns of a workbook's first worksheet.
+SCL screenshots -> a workbook's first worksheet, starting at column C.
 
 Everything is read on the machine running the app: the table is found with
 classical computer vision and each cell is read by matching its pixels
@@ -7,8 +7,10 @@ against the ANSYS font's own glyph shapes, with no model, no API key and
 nothing sent anywhere. Tesseract is only a fallback for cells that don't
 match, and those are flagged for checking.
 
-It runs in one of two places, and step four -- saving the workbook -- differs
-between them because of what each can reach:
+Tables can have any number of rows and columns.
+
+It runs in one of two places, and the final step -- saving the workbook --
+differs between them because of what each can reach:
 
   * On your laptop (Run SCL Tool.bat): the workbook is chosen by its path and
     saved back to that path in place. Nothing to download.
@@ -24,10 +26,11 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from openpyxl.utils import get_column_letter
 
 import local_config
-from excel_write import ROWS_PER_BLOCK, append_blocks, describe_target
-from table_read import COLUMNS, SUBTYPES, TableNotFound, read_table
+from excel_write import FIRST_COL, append_blocks, describe_target
+from table_read import TableNotFound, column_names, read_table, row_names
 
 IMAGE_TYPES = ["png", "jpg", "jpeg", "bmp", "tif", "tiff"]
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -43,8 +46,9 @@ st.set_page_config(page_title="SCL Table to Excel", layout="wide")
 st.title("SCL Table \u2192 Excel")
 st.caption(
     "Drop in the SCL screenshots and your workbook. Each table is cut away "
-    "from its graph, read cell by cell, and written into columns C:M of the "
-    "first worksheet \u2014 six rows per screenshot, one blank row between."
+    "from its graph, read cell by cell, and written into the first worksheet "
+    f"starting at column {get_column_letter(FIRST_COL)} \u2014 one block per "
+    "screenshot, one blank row between. Tables can be any size."
 )
 
 
@@ -197,7 +201,8 @@ if st.button(
         upload.seek(0)
         entry = {"name": upload.name}
         try:
-            crop, entry["rows"], entry["unreadable"], entry["uncertain"] = read_table(upload)
+            (crop, entry["rows"], entry["unreadable"],
+             entry["uncertain"], entry["notes"]) = read_table(upload)
         except TableNotFound as e:
             entry["error"] = f"No SCL table recognised: {e}."
         except Exception as e:
@@ -240,7 +245,14 @@ if results:
                 st.error(entry["error"])
                 continue
 
+            rows = entry["rows"]
+            cols = column_names(len(rows[0]))
+            subtypes = row_names(len(rows))
+
             st.image(entry["crop"], caption="What was read", width="stretch")
+
+            for note in entry.get("notes", []):
+                st.info(note)
 
             # A cell that did not come back as a number is left empty rather
             # than guessed, and named here so it can be typed in below.
@@ -249,7 +261,7 @@ if results:
                     "These cells could not be read as a number \u2014 fill them in "
                     "from the image above:\n\n"
                     + "\n".join(
-                        f"- {SUBTYPES[i]}, {COLUMNS[j]}"
+                        f"- {subtypes[i]}, {cols[j]}"
                         + (f" (read as `{raw}`)" if raw else "")
                         for i, j, raw in entry["unreadable"]
                     )
@@ -261,34 +273,30 @@ if results:
             if entry.get("uncertain"):
                 st.warning(
                     "These cells did not match the ANSYS font closely, so they "
-                    "were read a less reliable way — check each against the "
+                    "were read a less reliable way \u2014 check each against the "
                     "image above:\n\n"
                     + "\n".join(
-                        f"- {SUBTYPES[i]}, {COLUMNS[j]}: read as `{value}`"
+                        f"- {subtypes[i]}, {cols[j]}: read as `{value}`"
                         for i, j, value in entry["uncertain"]
                     )
                 )
 
             # Values are shown as text, in Python's shortest exact form, so the
-            # table shows precisely the digits that were read. Both number
-            # formats Streamlit offers get this wrong: the default rounds to
-            # four decimals (-0.13152 showed as -0.1315), and "plain" prints
-            # twenty, exposing binary floating-point noise (29.533 showed as
-            # 29.532999999999999...). excel_write turns the text back into
-            # numbers.
+            # table shows precisely the digits that were read. excel_write turns
+            # the text back into numbers.
             frame = pd.DataFrame(
-                [[None if v is None else repr(v) for v in row] for row in entry["rows"]],
-                columns=COLUMNS,
+                [[None if v is None else repr(v) for v in row] for row in rows],
+                columns=cols,
             )
-            frame.insert(0, "Subtype", SUBTYPES)
+            frame.insert(0, "Subtype", subtypes)
             edited = st.data_editor(
                 frame, width="stretch", hide_index=True, key=f"editor_{name}",
                 column_config={
                     "Subtype": st.column_config.TextColumn(disabled=True),
-                    **{c: st.column_config.TextColumn() for c in COLUMNS},
+                    **{c: st.column_config.TextColumn() for c in cols},
                 },
             )
-            edited_blocks.append((name, edited[COLUMNS].values.tolist()))
+            edited_blocks.append((name, edited[cols].values.tolist()))
 
     st.divider()
     # Hosted, the original is still on the laptop -- that is the backup.
@@ -316,12 +324,16 @@ if results:
                 sheet_name, _ = describe_target(excel_path)
                 where = excel_path.name if HOSTED else excel_path
                 st.success(
-                    f"Written into **{where}**, columns C:M of *{sheet_name}*:\n\n"
-                    + "\n".join(f"- {name} \u2192 rows {a}\u2013{b}" for name, a, b in written)
+                    f"Written into **{where}**, first worksheet *{sheet_name}*:\n\n"
+                    + "\n".join(
+                        f"- {name} \u2192 rows {r1}\u2013{r2}, "
+                        f"columns {get_column_letter(c1)}:{get_column_letter(c2)}"
+                        for name, r1, r2, c1, c2 in written
+                    )
                 )
                 if backup:
                     st.caption(f"Backup: `{backup.name}`")
-                names = [name for name, _, _ in written]
+                names = [w[0] for w in written]
                 if HOSTED:
                     st.session_state.written_here = (
                         st.session_state.get("written_here", []) + names
@@ -335,8 +347,8 @@ if results:
 
             if skipped:
                 st.warning(
-                    f"Not written \u2014 each screenshot must give {ROWS_PER_BLOCK} "
-                    "rows of 11 numbers:\n\n"
+                    "Not written \u2014 each block must be a complete rectangle "
+                    "of numbers:\n\n"
                     + "\n".join(f"- **{name}**: {why}" for name, why in skipped)
                     + "\n\nFill in the empty cells above and press the button again."
                 )
