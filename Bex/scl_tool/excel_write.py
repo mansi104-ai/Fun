@@ -1,10 +1,10 @@
 """
 Writes extracted blocks into the workbook's first worksheet, in place,
-starting at column C. Blocks can have any number of rows and columns.
+starting at column C.
 
-Each block is placed one blank row below the last row holding anything in
-column C or beyond (not the last row of the whole sheet). Columns A and B
-are never touched.
+Each block goes below the last row that holds anything in the first C:M set
+of columns. Data to the right of M, and columns A and B, do not affect where
+a block lands and are never touched.
 """
 
 import math
@@ -14,7 +14,9 @@ from pathlib import Path
 
 import openpyxl
 
-FIRST_COL = 3  # column C
+FIRST_COL = 3        # column C
+SET_LAST_COL = 13    # column M: the end of the first set, used to find the last occupied row
+GAP_ROWS = 1         # blank rows between blocks (0 = directly below the last occupied row)
 
 
 def as_number(value):
@@ -33,13 +35,18 @@ def as_number(value):
     return number if math.isfinite(number) else None
 
 
-def next_block_row(worksheet):
-    """One blank row below the last row with anything from column C onward; row 2 if empty."""
-    last_col = max(worksheet.max_column, FIRST_COL)
+def next_block_row(worksheet, width=0):
+    """
+    The row a new block starts on: below the last row holding anything in C:M.
+
+    If a block is wider than C:M, its own width is included so it can't
+    overwrite data it spills over. Row 2 if the area is empty.
+    """
+    last_col = max(SET_LAST_COL, FIRST_COL + width - 1)
     for row in range(worksheet.max_row, 1, -1):
         if any(worksheet.cell(row=row, column=c).value not in (None, "")
                for c in range(FIRST_COL, last_col + 1)):
-            return row + 2
+            return row + 1 + GAP_ROWS
     return 2
 
 
@@ -70,11 +77,8 @@ def back_up(excel_path):
 
 def append_blocks(excel_path, blocks, make_backup=True):
     """
-    Append each block starting at column C of the first worksheet and save in place.
-
-    `blocks` is a sequence of (name, rows). Rows may be any size as long as the
-    block is rectangular and every cell is a number. Invalid blocks (including
-    any with an unread cell) are skipped whole and reported.
+    Append each block at column C of the first worksheet, below the last
+    occupied row of C:M, and save in place.
 
     Returns (written, skipped, backup):
       written  [(name, first_row, last_row, first_col, last_col)]
@@ -99,43 +103,17 @@ def append_blocks(excel_path, blocks, make_backup=True):
 
     written = []
     for name, rows in good:
-        start = next_block_row(worksheet)
+        width = len(rows[0])
+        start = next_block_row(worksheet, width)
         for i, values in enumerate(rows):
             for j, value in enumerate(values):
                 cell = worksheet.cell(row=start + i, column=FIRST_COL + j, value=value)
                 cell.number_format = "General"
         written.append((name, start, start + len(rows) - 1,
-                        FIRST_COL, FIRST_COL + len(rows[0]) - 1))
+                        FIRST_COL, FIRST_COL + width - 1))
 
     workbook.save(excel_path)
     return written, skipped, backup
-
-
-def append_from_images(excel_path, image_paths, read_table, make_backup=True):
-    """
-    Read each screenshot with `read_table` (from the table reader) and append
-    the numbers. Returns (written, skipped, backup, notes), where notes
-    collects the reader's warnings per image.
-
-    An image whose grid isn't found, or which has any unreadable cell, goes
-    to `skipped` with the reason; nothing partial is written.
-    """
-    blocks, skipped, notes = [], [], []
-    for path in image_paths:
-        name = Path(path).name
-        try:
-            _crop, rows, unreadable, _uncertain, image_notes = read_table(path)
-        except Exception as error:   # e.g. TableNotFound
-            skipped.append((name, str(error)))
-            continue
-        notes.extend((name, n) for n in image_notes)
-        if unreadable:
-            skipped.append((name, f"{len(unreadable)} unreadable cell(s)"))
-            continue
-        blocks.append((name, rows))
-
-    written, more_skipped, backup = append_blocks(excel_path, blocks, make_backup)
-    return written, skipped + more_skipped, backup, notes
 
 
 def describe_target(excel_path):
