@@ -10,6 +10,7 @@ are never touched.
 import math
 import shutil
 from datetime import datetime
+from pathlib import Path
 
 import openpyxl
 
@@ -60,6 +61,7 @@ def check_block(rows):
 
 def back_up(excel_path):
     """Copy the workbook beside itself before the first write of a save."""
+    excel_path = Path(excel_path)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = excel_path.with_name(f"{excel_path.stem}.backup-{stamp}{excel_path.suffix}")
     shutil.copy2(excel_path, backup)
@@ -70,12 +72,15 @@ def append_blocks(excel_path, blocks, make_backup=True):
     """
     Append each block starting at column C of the first worksheet and save in place.
 
-    `blocks` is a sequence of (name, rows), with rows of any size as long as
-    it is rectangular and all numeric. Invalid blocks are skipped whole and
-    reported. Returns (written, skipped, backup) where written is
-    [(name, first_row, last_row, first_col, last_col)] and skipped is
-    [(name, reason)].
+    `blocks` is a sequence of (name, rows). Rows may be any size as long as the
+    block is rectangular and every cell is a number. Invalid blocks (including
+    any with an unread cell) are skipped whole and reported.
+
+    Returns (written, skipped, backup):
+      written  [(name, first_row, last_row, first_col, last_col)]
+      skipped  [(name, reason)]
     """
+    excel_path = Path(excel_path)
     good, skipped = [], []
     for name, rows in blocks:
         reason = check_block(rows)
@@ -104,6 +109,33 @@ def append_blocks(excel_path, blocks, make_backup=True):
 
     workbook.save(excel_path)
     return written, skipped, backup
+
+
+def append_from_images(excel_path, image_paths, read_table, make_backup=True):
+    """
+    Read each screenshot with `read_table` (from the table reader) and append
+    the numbers. Returns (written, skipped, backup, notes), where notes
+    collects the reader's warnings per image.
+
+    An image whose grid isn't found, or which has any unreadable cell, goes
+    to `skipped` with the reason; nothing partial is written.
+    """
+    blocks, skipped, notes = [], [], []
+    for path in image_paths:
+        name = Path(path).name
+        try:
+            _crop, rows, unreadable, _uncertain, image_notes = read_table(path)
+        except Exception as error:   # e.g. TableNotFound
+            skipped.append((name, str(error)))
+            continue
+        notes.extend((name, n) for n in image_notes)
+        if unreadable:
+            skipped.append((name, f"{len(unreadable)} unreadable cell(s)"))
+            continue
+        blocks.append((name, rows))
+
+    written, more_skipped, backup = append_blocks(excel_path, blocks, make_backup)
+    return written, skipped + more_skipped, backup, notes
 
 
 def describe_target(excel_path):
