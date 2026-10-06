@@ -1,18 +1,10 @@
 """
-Writes extracted blocks into columns C:M of a workbook's first worksheet, in
-place, at the path the workbook already lives at.
+Writes extracted blocks into the workbook's first worksheet, in place,
+starting at column C. Blocks can have any number of rows and columns.
 
-The layout is the one the reference workbook already uses: row 1 is the header
-(C1:M1 = SX ... SEQV), then blocks of six rows with a single blank row between
-them. Column A carries the SCL number and column B the row labels; neither is
-touched, because the numbers are all that is being added.
-
-"After the last occupied row" means the last row holding anything in C:M --
-not the last row on the sheet. That distinction matters for the real workbook:
-its column A is pre-numbered with empty blocks far below where the data ends
-(numbers at rows 37, 44, 51, ... while C:M stops at row 35). Measuring the
-whole sheet would push every new block hundreds of rows down; measuring C:M
-puts it at row 37, landing exactly on the next pre-numbered block.
+Each block is placed one blank row below the last row holding anything in
+column C or beyond (not the last row of the whole sheet). Columns A and B
+are never touched.
 """
 
 import math
@@ -21,28 +13,17 @@ from datetime import datetime
 
 import openpyxl
 
-FIRST_COL = 3          # column C
-COL_COUNT = 11         # C..M inclusive
-LAST_COL = FIRST_COL + COL_COUNT - 1
-ROWS_PER_BLOCK = 6
+FIRST_COL = 3  # column C
 
 
 def as_number(value):
-    """
-    Parse one reviewed cell into a float, or None if it isn't a number.
-
-    An emptied cell comes back from the review table as NaN (or the text
-    "nan"), not None. NaN is a float, so without the explicit check it would
-    count as a value and be written into the sheet as a number that isn't one.
-    """
+    """Parse one cell into a float, or None if it isn't a finite number."""
     if value is None:
         return None
     if isinstance(value, (int, float)):
         number = float(value)
     else:
         text = str(value).strip().replace(",", "")
-        # A minus sign pasted from elsewhere is often an en-dash; keep the
-        # sign rather than losing the value to it.
         text = text.replace("–", "-").replace("—", "-").replace("−", "-")
         try:
             number = float(text)
@@ -52,35 +33,33 @@ def as_number(value):
 
 
 def next_block_row(worksheet):
-    """One blank row below the last row with anything in C:M; row 2 if empty."""
+    """One blank row below the last row with anything from column C onward; row 2 if empty."""
+    last_col = max(worksheet.max_column, FIRST_COL)
     for row in range(worksheet.max_row, 1, -1):
         if any(worksheet.cell(row=row, column=c).value not in (None, "")
-               for c in range(FIRST_COL, LAST_COL + 1)):
+               for c in range(FIRST_COL, last_col + 1)):
             return row + 2
     return 2
 
 
 def check_block(rows):
     """Return a reason the block can't be written, or None if it's good."""
-    if len(rows) != ROWS_PER_BLOCK:
-        return f"{len(rows)} rows, expected {ROWS_PER_BLOCK}"
+    if not rows:
+        return "block is empty"
+    width = len(rows[0])
+    if width == 0:
+        return "row 1 is empty"
     for i, row in enumerate(rows, start=1):
-        values = [as_number(v) for v in row]
-        if len(values) != COL_COUNT or any(v is None for v in values):
-            missing = sum(1 for v in values if v is None)
-            return f"row {i} has {COL_COUNT - missing} of {COL_COUNT} numbers"
+        if len(row) != width:
+            return f"row {i} has {len(row)} columns, expected {width}"
+        missing = sum(1 for v in row if as_number(v) is None)
+        if missing:
+            return f"row {i} has {width - missing} of {width} numbers"
     return None
 
 
 def back_up(excel_path):
-    """
-    Copy the workbook beside itself before the first write of a save.
-
-    openpyxl rewrites the whole file from its parsed model rather than patching
-    the bytes, so anything it does not model is not carried across. This
-    workbook holds only sheets, values and merged cells, all of which survive
-    -- but a backup costs a moment and makes a bad save undoable.
-    """
+    """Copy the workbook beside itself before the first write of a save."""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = excel_path.with_name(f"{excel_path.stem}.backup-{stamp}{excel_path.suffix}")
     shutil.copy2(excel_path, backup)
@@ -89,12 +68,13 @@ def back_up(excel_path):
 
 def append_blocks(excel_path, blocks, make_backup=True):
     """
-    Append each block into C:M of the first worksheet and save to the same path.
+    Append each block starting at column C of the first worksheet and save in place.
 
-    `blocks` is a sequence of (name, rows). A block that isn't exactly 6 x 11
-    numbers is skipped whole and reported -- a half-written block on the sheet
-    would be worse than none. Returns (written, skipped, backup) where written
-    is [(name, first_row, last_row)] and skipped is [(name, reason)].
+    `blocks` is a sequence of (name, rows), with rows of any size as long as
+    it is rectangular and all numeric. Invalid blocks are skipped whole and
+    reported. Returns (written, skipped, backup) where written is
+    [(name, first_row, last_row, first_col, last_col)] and skipped is
+    [(name, reason)].
     """
     good, skipped = [], []
     for name, rows in blocks:
@@ -118,12 +98,9 @@ def append_blocks(excel_path, blocks, make_backup=True):
         for i, values in enumerate(rows):
             for j, value in enumerate(values):
                 cell = worksheet.cell(row=start + i, column=FIRST_COL + j, value=value)
-                # Some empty cells in the reference workbook still carry a
-                # 0.00E+00 format, left behind by earlier pasting, which
-                # would show -0.040742 as -4.07E-02. General shows the whole
-                # value as read.
                 cell.number_format = "General"
-        written.append((name, start, start + ROWS_PER_BLOCK - 1))
+        written.append((name, start, start + len(rows) - 1,
+                        FIRST_COL, FIRST_COL + len(rows[0]) - 1))
 
     workbook.save(excel_path)
     return written, skipped, backup
