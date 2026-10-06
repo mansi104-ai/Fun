@@ -1,22 +1,21 @@
 """
-Finds the SCL results table in a screenshot and reads its 6 x 11 numbers.
+Finds the SCL results table in a screenshot and reads its numbers.
 
 Classical computer vision only -- no model, no API key, nothing over the
 network. The table is a drawn grid, so the cells are located geometrically
 first; then each cell is read by matching its pixels against the shapes of
 the ANSYS font's characters (see "Reading the cells" below).
 
-The pixel facts the grid search keys on, measured from a real 968x823
-screenshot:
+The table may have any number of data rows and value columns. The first row
+is taken as the header and the first column as the label column; everything
+else is read as numbers.
+
+Pixel facts the grid search keys on (from a real 968x823 screenshot):
 
     panel background   160    the grey around the table
     table rules        192    the 1px lines of the grid
     outer border       100
     cell background    255    white
-
-so a rule is a line where the whole width is non-white, and a cell is white.
-The graph never enters the picture: only the cells inside the found grid are
-read, and the plot lies hundreds of pixels below the last of them.
 """
 
 import json
@@ -34,27 +33,25 @@ WHITE = 240
 WIDTH_FRACTION = 0.80     # a rule spans the pane; a row of numbers does not
 MAX_RULE_THICKNESS = 4    # a thin line, not the filled title bar at the top
 MAX_RULE_GAP = 40         # rules sit ~17px apart; the graph's lines are ~250px
-MIN_RULES = 4
+MIN_RULES = 3             # header + at least one data row + closing rule
 COLUMN_WHITE_FRACTION = 0.15
 CELL_ROW_FRACTION = 0.30  # a row of cells is ~70% white; a rule row is ~0%
 MAX_RULE_PITCH_DRIFT = 1.5  # a missing middle rule leaves a gap of ~2 pitches
+CROSSED_FRACTION = 0.90   # share of a strip a horizontal rule must cover
+RULE_ROW_FRACTION = 0.90  # share of vertical rules that must continue in a row
 
-# The SCL worksheet always has a Subtype column plus these 11, and six rows
-# under one header row. Those counts are the grid's shape, so finding a
-# different shape means the grid was not found -- better to say so than to
-# read whatever was there.
-COLUMNS = ["SX", "SY", "SZ", "SXY", "SYZ", "SXZ", "S1", "S2", "S3", "SINT", "SEQV"]
-SUBTYPES = [
+# Optional default labels. Used only when the grid's size matches; otherwise
+# generic names are generated. Nothing is validated against them.
+DEFAULT_COLUMNS = ["SX", "SY", "SZ", "SXY", "SYZ", "SXZ", "S1", "S2", "S3", "SINT", "SEQV"]
+DEFAULT_SUBTYPES = [
     "Membrane", "Bending (Inside)", "Bending (Outside)",
     "Membrane+Bending (Inside)", "Membrane+Bending (Center)",
     "Membrane+Bending (Outside)",
 ]
-EXPECTED_V_RULES = len(COLUMNS) + 2      # 11 numeric columns + the label column
-EXPECTED_H_RULES = len(SUBTYPES) + 2     # 6 data rows + the header row
 
 OCR_CONFIG = "--psm 7 -c tessedit_char_whitelist=0123456789.-e+"
-UPSCALE = 6               # a ~47x16 cell is too small for OCR until it isn't
-OCR_MARGIN = 30           # white space around the upscaled cell
+UPSCALE = 6
+OCR_MARGIN = 30
 
 TESSERACT_CANDIDATES = [
     r"C:\Program Files\Tesseract-OCR\tesseract.exe",
@@ -80,6 +77,14 @@ def find_tesseract(override=None):
     return None
 
 
+def column_names(count):
+    return DEFAULT_COLUMNS if count == len(DEFAULT_COLUMNS) else [f"C{j + 1}" for j in range(count)]
+
+
+def row_names(count):
+    return DEFAULT_SUBTYPES if count == len(DEFAULT_SUBTYPES) else [f"R{i + 1}" for i in range(count)]
+
+
 # ---------------------------------------------------------------------------
 # Finding the grid
 # ---------------------------------------------------------------------------
@@ -100,13 +105,7 @@ def _narrow_groups(flags, max_width):
 
 
 def _horizontal_rules(gray):
-    """
-    Row indices of the table's rules: the first tight run of thin lines.
-
-    As with the vertical rules, a rule must sit against a row of white cells.
-    Without that, a top or bottom border that meets a grey band above or below
-    it merges into one thick run and is discarded as if it were the title bar.
-    """
+    """Row indices of the table's rules: the first tight run of thin lines."""
     height, width = gray.shape
     spans = (gray < NON_WHITE).sum(axis=1) >= WIDTH_FRACTION * width
     cell_row = (gray >= WHITE).sum(axis=1) >= CELL_ROW_FRACTION * width
@@ -129,69 +128,11 @@ def _horizontal_rules(gray):
     return cluster if len(cluster) >= MIN_RULES else None
 
 
-def _close_clipped_last_row(gray, rules):
+def _candidate_vertical_rules(gray, top, bottom):
     """
-    Close off a last row whose bottom rule is not in the picture.
-
-    The worksheet pane is often sized so that the sixth row is the last thing
-    it shows, and the rule beneath it falls under the Geometry/Worksheet tab
-    strip: the numbers are all there, but only seven of the eight rules are.
-    So when white cells carry on below the last rule for most of a row's
-    height, that band is the sixth row, and it is closed at one row's pitch
-    below the rule -- or at the cut, whichever comes first.
-
-    Returns the extended rules, or None when the rule missing is not the last
-    one at all -- the rules are unevenly spaced then, and the caller should
-    report the row count rather than blame the crop. Raises TableNotFound when
-    it *is* the last row but the cut went through the digits, which would be
-    read as some other number rather than not read at all.
-    """
-    height, width = gray.shape
-    gaps = np.diff(rules)
-    pitch = int(np.median(gaps))
-    if pitch < 1 or gaps.max() > MAX_RULE_PITCH_DRIFT * pitch:
-        return None
-
-    cell_row = (gray >= WHITE).sum(axis=1) >= CELL_ROW_FRACTION * width
-    y = rules[-1] + 1
-    while y < height and cell_row[y]:
-        y += 1
-    y = min(y, rules[-1] + pitch)
-    if y - rules[-1] - 1 < _readable_row_height():
-        raise TableNotFound(
-            f"the {SUBTYPES[-1]} row is cut off at the bottom of this image, so "
-            "its numbers cannot be read -- re-take the screenshot with a little "
-            "space below the table"
-        )
-    return rules + [y]
-
-
-def _readable_row_height():
-    """
-    The shortest cell band the glyph matcher can still read exactly.
-
-    A glyph box is blank for its last few rows, so a row cut off inside that
-    blank margin loses nothing: the matcher pads the band back out and scores
-    an identical match. Cut one row higher and the digits themselves are
-    sliced, so the shapes no longer match and the cell falls to Tesseract --
-    which, on a half-digit, answers 2.4 where the table said 20.264. Refusing
-    is the better answer there, so this is where the recovery stops.
-    """
-    glyphs = _load_glyphs()
-    inked = np.concatenate(list(glyphs.values()), axis=1).sum(axis=1)
-    return int(np.max(np.nonzero(inked))) + 1
-
-
-def _vertical_rules(gray, top, bottom):
-    """
-    Column indices of the grid's vertical rules, within the table's own band.
-
-    A rule is a column carrying almost no white that sits right against a
-    white cell. "Right against a cell" is what matters: the table's right
-    border runs straight into the grey pane beyond it, so border and pane form
-    one long white-free stretch, and judging by width alone would throw the
-    border away with the pane. The image edges are excluded, since an edge has
-    nothing beyond it for a rule to separate.
+    Every full-height dark line that sits against white, inside the table's
+    row band. This over-collects on purpose: it also picks up things like the
+    window frame. _table_rules decides which of them belong to the table.
     """
     band = gray[top + 1:bottom]
     if band.shape[0] < 4:
@@ -207,45 +148,130 @@ def _vertical_rules(gray, top, bottom):
     return [x for x in _narrow_groups(beside_cell, 3) if 1 < x < width - 2]
 
 
+def _table_rules(gray, h_rules, candidates):
+    """
+    Keep only the vertical rules that belong to the table.
+
+    A real column strip is crossed by every horizontal rule. White margin
+    between the window frame and the table is not: it has vertical lines on
+    both sides but nothing running across it. So each gap between neighbouring
+    candidates is tested for being crossed, and the longest unbroken run of
+    crossed gaps is the table.
+    """
+    if len(candidates) < 2:
+        return []
+    crossed = []
+    for a, b in zip(candidates, candidates[1:]):
+        strip = gray[:, a + 2:b - 1] if b - a > 4 else gray[:, a + 1:b]
+        if strip.size == 0:
+            crossed.append(False)
+            continue
+        hits = [(strip[y] < NON_WHITE).mean() >= CROSSED_FRACTION for y in h_rules]
+        crossed.append(all(hits))
+
+    best, start = (0, 0), None
+    for i, ok in enumerate(crossed + [False]):
+        if ok and start is None:
+            start = i
+        elif not ok and start is not None:
+            if i - start > best[1] - best[0]:
+                best = (start, i)
+            start = None
+    first, last = best
+    return candidates[first:last + 1] if last > first else []
+
+
+def _close_clipped_last_row(gray, h_rules, v_rules):
+    """
+    Handle a last row whose bottom rule is not in the picture.
+
+    A row below the last rule only counts if the table's vertical rules keep
+    running through it AND its cells are white -- that is what separates a
+    clipped table row from the tab strip or plot beneath the table. Its height
+    is capped at one row's pitch.
+
+    Returns (h_rules, note). Raises TableNotFound if the cut went through the
+    digits, since half a digit reads as a different number.
+    """
+    height = gray.shape[0]
+    left, right = v_rules[0], v_rules[-1]
+    pitch = int(np.median(np.diff(h_rules)))
+    cells = (gray[:, left + 1:right] >= WHITE).mean(axis=1) >= CELL_ROW_FRACTION
+    runs = np.array([(gray[:, max(x - 1, 0):x + 2].min(axis=1) < NON_WHITE) for x in v_rules])
+    continues = runs.mean(axis=0) >= RULE_ROW_FRACTION
+
+    y0 = h_rules[-1] + 1
+    y = y0
+    while y < height and y - y0 < pitch and cells[y] and continues[y]:
+        y += 1
+    band = y - y0
+    if band <= 0:
+        return h_rules, None
+
+    if band >= _readable_row_height():
+        return h_rules + [y], None
+
+    has_ink = (gray[y0:y, left + 1:right] < 128).any()
+    if has_ink:
+        raise TableNotFound(
+            "the last row is cut off at the bottom of this image, so its numbers "
+            "cannot be read -- re-take the screenshot with a little space below the table"
+        )
+    return h_rules, (
+        f"{band}px of an extra row show below the table with nothing readable in "
+        "them; it was ignored"
+    )
+
+
+def _readable_row_height():
+    """The shortest cell band the glyph matcher can still read exactly."""
+    glyphs = _load_glyphs()
+    inked = np.concatenate(list(glyphs.values()), axis=1).sum(axis=1)
+    return int(np.max(np.nonzero(inked))) + 1
+
+
 def find_grid(source):
     """
-    Locate the table. Returns (image, h_rules, v_rules), rules as pixel positions.
+    Locate the table. Returns (image, h_rules, v_rules, notes).
 
-    Raises TableNotFound with a reason, rather than returning a grid it is not
-    sure about -- a wrong grid reads wrong numbers silently, which is the one
-    outcome worth refusing.
+    The table may have any number of rows and columns. Raises TableNotFound
+    rather than returning a grid it is not sure about.
     """
     image = Image.open(source).convert("RGB")
     gray = np.asarray(image.convert("L"))
+    notes = []
 
     h_rules = _horizontal_rules(gray)
     if not h_rules:
         raise TableNotFound("no table grid found in this image")
-    if len(h_rules) == EXPECTED_H_RULES - 1:
-        h_rules = _close_clipped_last_row(gray, h_rules) or h_rules
-    if len(h_rules) != EXPECTED_H_RULES:
+
+    gaps = np.diff(h_rules)
+    pitch = float(np.median(gaps))
+    if gaps.max() > MAX_RULE_PITCH_DRIFT * pitch:
         raise TableNotFound(
-            f"found {len(h_rules) - 1} table rows, expected "
-            f"{EXPECTED_H_RULES - 1} (a header row and {len(SUBTYPES)} data rows)"
+            "the table's horizontal rules are unevenly spaced (a rule may be missing "
+            "or hidden), so rows cannot be told apart reliably"
         )
 
-    v_rules = _vertical_rules(gray, h_rules[0], h_rules[-1])
-    if len(v_rules) != EXPECTED_V_RULES:
+    candidates = _candidate_vertical_rules(gray, h_rules[0], h_rules[-1])
+    v_rules = _table_rules(gray, h_rules, candidates)
+    if len(v_rules) < 3:     # a label column and at least one value column
         raise TableNotFound(
-            f"found {max(len(v_rules) - 1, 0)} table columns, expected "
-            f"{EXPECTED_V_RULES - 1} (a Subtype column and {len(COLUMNS)} value columns)"
+            f"found {max(len(v_rules) - 1, 0)} table columns; need a label column "
+            "and at least one value column"
         )
 
-    return image, h_rules, v_rules
+    h_rules, note = _close_clipped_last_row(gray, h_rules, v_rules)
+    if note:
+        notes.append(note)
+    if len(h_rules) < 3:
+        raise TableNotFound("found no data rows under the header row")
+
+    return image, h_rules, v_rules, notes
 
 
 def crop_to_table(image, h_rules, pad=6):
-    """
-    Everything above the table's bottom rule, for showing what was read.
-
-    The full width and the top of the screenshot come along, so the "SCL- N"
-    label and the "Stress Units" line stay visible; the graph does not.
-    """
+    """Everything above the table's bottom rule, for showing what was read."""
     return image.crop((0, 0, image.width, min(image.height, h_rules[-1] + pad)))
 
 
@@ -253,30 +279,15 @@ def crop_to_table(image, h_rules, pad=6):
 # Reading the cells
 # ---------------------------------------------------------------------------
 #
-# ANSYS draws every number in one screen font, Segoe UI 9pt, with no
-# kerning: each digit is 6px wide, "." 3px, "-" 5px, "e" 6px, "+" 8px, and
-# every "5" is pixel-for-pixel the same "5". So a cell is read by matching
-# shapes, not by guessing: glyphs.json holds the ink map of each character,
-# and a cell is decoded as the run of characters whose shapes, laid side by
-# side, reproduce its pixels most closely.
-#
-# That replaced Tesseract as the reader because Tesseract guesses. On the
-# SCL-1 screenshot it read 5.0275 as 9.0275 and 5.0026 as 3.0026; on a
-# faithful re-rendering of the same table it got six cells wrong, most of them
-# 5s. Shape matching reads that re-rendering 66/66, and a real screenshot
-# 66/66 with a mismatch of exactly zero.
-#
-# The digits, "." and "-" in glyphs.json were cut from a real ANSYS
-# screenshot; "e" and "+" (absent from it) were drawn by Windows in Segoe UI
-# 9pt ClearType, the one font whose widths match the screenshot exactly.
+# ANSYS draws every number in one screen font, Segoe UI 9pt, with no kerning,
+# so a cell is read by matching shapes: glyphs.json holds the ink map of each
+# character, and a cell is decoded as the run of characters whose shapes, laid
+# side by side, reproduce its pixels most closely. Tesseract is only the
+# fallback for cells whose shapes don't match.
 
 GLYPHS_FILE = Path(__file__).with_name("glyphs.json")
-# Mismatch is the leftover pixel error as a share of the cell's ink: 0 means
-# identical. Genuine ANSYS text scores 0.00-0.10 (ClearType settings differ a
-# little between machines); a different font scores above 0.4. Anything over
-# the threshold is not trusted and goes to Tesseract, flagged for checking.
 MATCH_THRESHOLD = 0.25
-VERTICAL_SEARCH = 3       # rows up or down the text may sit from where it was measured
+VERTICAL_SEARCH = 3
 NUMBER = re.compile(r"-?\d+(\.\d*)?(e[+-]\d+)?$")
 
 _glyphs = None
@@ -298,15 +309,7 @@ def _cell_ink(gray, h_rules, v_rules, row, column):
 
 
 def _decode(ink, glyphs):
-    """
-    The character string whose glyphs best reproduce this strip of ink.
-
-    Dynamic programming across the columns: every column is either blank or
-    the start of a glyph, and the cheapest way to explain the whole strip wins.
-    It needs no gaps between characters, which matters -- ClearType smears
-    neighbouring digits together, so "386" is one unbroken blot of ink.
-    Returns (text, mismatch).
-    """
+    """The character string whose glyphs best reproduce this strip of ink."""
     height, width = ink.shape
     blank = (ink ** 2).sum(axis=0)
     costs = {}
@@ -338,12 +341,7 @@ def _decode(ink, glyphs):
 
 
 def _match_shapes(ink):
-    """
-    Decode a cell by glyph shape. Returns (value or None, mismatch).
-
-    The text is tried a few rows up and down from where it was measured, so a
-    screenshot framed a pixel differently still lines up.
-    """
+    """Decode a cell by glyph shape. Returns (value or None, mismatch)."""
     glyphs = _load_glyphs()
     glyph_height = next(iter(glyphs.values())).shape[0]
     padded = np.pad(ink, ((VERTICAL_SEARCH, VERTICAL_SEARCH), (0, 0)))
@@ -360,14 +358,12 @@ def _match_shapes(ink):
 
 
 def _tesseract_image(ink):
-    """A cell prepared for Tesseract: upscaled and set in a white margin."""
     cell = Image.fromarray(((1.0 - ink) * 255).clip(0, 255).astype(np.uint8))
     cell = cell.resize((cell.width * UPSCALE, cell.height * UPSCALE), Image.LANCZOS)
     return ImageOps.expand(cell, border=OCR_MARGIN, fill=255)
 
 
 def _to_number(text):
-    """Tesseract's text as a float, or None if it isn't one."""
     text = text.strip().replace(" ", "")
     try:
         return float(text) if text else None
@@ -377,24 +373,20 @@ def _to_number(text):
 
 def read_cells(image, h_rules, v_rules, tesseract_cmd=None):
     """
-    Read every cell of the found grid.
+    Read every data cell of the found grid (header row and label column skipped).
 
     Returns (rows, unreadable, uncertain):
-      rows        6 lists of 11 values, each a float or None
+      rows        one list of floats/None per data row, any size
       unreadable  (row, column, raw text) for cells with no number at all
-      uncertain   (row, column, value) for cells whose shapes did not match the
-                  ANSYS font closely, so Tesseract read them instead -- these
-                  are the ones worth checking against the image
-
-    Tesseract is only needed for the fallback. If it is not installed, a cell
-    that needs it is left empty rather than guessed.
+      uncertain   (row, column, value) for cells Tesseract had to read
     """
     gray = np.asarray(image.convert("L"))
     binary = tesseract_cmd or find_tesseract()
+    n_rows, n_cols = len(h_rules) - 2, len(v_rules) - 2
     rows, unreadable, uncertain = [], [], []
-    for i in range(len(SUBTYPES)):
+    for i in range(n_rows):
         values = []
-        for j in range(len(COLUMNS)):
+        for j in range(n_cols):
             ink = _cell_ink(gray, h_rules, v_rules, i, j)
             value, mismatch = _match_shapes(ink)
             if value is not None and mismatch <= MATCH_THRESHOLD:
@@ -417,7 +409,10 @@ def read_cells(image, h_rules, v_rules, tesseract_cmd=None):
 
 
 def read_table(source, tesseract_cmd=None):
-    """Grid, crop and numbers in one call. Returns (crop, rows, unreadable, uncertain)."""
-    image, h_rules, v_rules = find_grid(source)
+    """
+    Grid, crop and numbers in one call.
+    Returns (crop, rows, unreadable, uncertain, notes).
+    """
+    image, h_rules, v_rules, notes = find_grid(source)
     rows, unreadable, uncertain = read_cells(image, h_rules, v_rules, tesseract_cmd)
-    return crop_to_table(image, h_rules), rows, unreadable, uncertain
+    return crop_to_table(image, h_rules), rows, unreadable, uncertain, notes
